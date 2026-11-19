@@ -73,7 +73,7 @@ test -n "$code"
 password=$(openssl rand -hex 18)
 login=$(jq -nc --arg password "$password" '{username:"app-smoke",password:$password}')
 jq -nc --arg code "$code" --argjson account "$login" \
-  '{code:$code,mode:"required",account:$account,admission:"ask",storage:{root:"./storage"}}' |
+  '{code:$code,mode:"required",account:$account,admission:"ask",configuration:{},storage:{root:"./storage"}}' |
   curl -fsS -H 'Content-Type: application/json' --data-binary @- "$origin/api/v1/setup" >/dev/null
 wait_for_setup 'done'
 
@@ -83,7 +83,7 @@ sign_in() {
 }
 sign_in
 printf 'G28\n' > "$work/sample.gcode"
-curl -fsS -b "$work/cookies" -T "$work/sample.gcode" \
+curl -fsS -b "$work/cookies" -H 'Content-Type: application/octet-stream' -T "$work/sample.gcode" \
   "$origin/api/v1/storages/local/content?path=sample.gcode" >/dev/null
 curl -fsS -D "$work/printer-headers" -o /dev/null -H 'Content-Type: application/json' \
   --data-binary '{"sn":"APP-SMOKE","fingerprint":"APP-SMOKE-1","printer_type":"1.4.0","firmware":"6.4.0"}' \
