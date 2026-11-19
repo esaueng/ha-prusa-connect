@@ -42,7 +42,8 @@ start_app() {
 wait_for_setup() {
   local state=$1
   for _ in $(seq 1 60); do
-    if curl -fsS --max-time 2 "$origin/api/v1/setup" 2>/dev/null | jq -e --arg state "$state" '.state == $state' >/dev/null; then
+    if curl -fsS --max-time 2 "$origin/api/v1/setup" 2>/dev/null | jq -e --arg state "$state" '.state == $state' >/dev/null &&
+      curl -fsS --max-time 2 "$origin/api/v1/readiness" >/dev/null 2>&1; then
       return
     fi
     sleep 1
@@ -91,17 +92,23 @@ curl -fsS -D "$work/printer-headers" -o /dev/null -H 'Content-Type: application/
 registration=$(awk 'tolower($1) == "code:" { sub(/\r$/, "", $2); print $2 }' "$work/printer-headers")
 test -n "$registration"
 curl -fsS -b "$work/cookies" -X POST "$origin/api/v1/registrations/$registration/approve" >/dev/null
-printer_token() {
-  curl -fsS -D - -o /dev/null -H "Code: $registration" "$origin/p/register" |
-    awk 'tolower($1) == "token:" { sub(/\r$/, "", $2); print $2 }'
-}
-token=$(printer_token)
+token=$(curl -fsS -D - -o /dev/null -H "Code: $registration" "$origin/p/register" |
+  awk 'tolower($1) == "token:" { sub(/\r$/, "", $2); print $2 }')
 test -n "$token"
 
 start_app --force-recreate
 wait_for_setup 'done'
 sign_in
-curl -fsS -b "$work/cookies" "$origin/api/v1/storages/local/content?path=sample.gcode" -o "$work/reloaded.gcode"
+curl -fsS --retry 10 --retry-delay 1 -b "$work/cookies" \
+  "$origin/api/v1/storages/local/content?path=sample.gcode" -o "$work/reloaded.gcode"
 cmp "$work/sample.gcode" "$work/reloaded.gcode"
-test "$(printer_token)" = "$token"
+
+# A reboot retains the credential's digest. Polling registration again issues
+# a fresh token, so reconnect with the existing one as the printer would.
+curl -s --http1.1 --max-time 3 -D "$work/websocket-headers" -o /dev/null \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: prusa-connect' -H 'Fingerprint: APP-SMOKE-1' \
+  -H "Token: $token" "$origin/p/ws" || true
+grep -Eq '^HTTP/1\.1 101([[:space:]]|$)' "$work/websocket-headers"
 echo "Administrator, uploaded file, and printer registration survived container replacement."
