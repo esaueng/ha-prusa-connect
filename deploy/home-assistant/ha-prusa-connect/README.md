@@ -36,15 +36,19 @@ published port. Load it on the printer and approve the pairing code.
 You can change the LAN port under the app's **Configuration > Network** if
 another service uses `8080`. The app always listens on port `8080` inside the
 container.
-If you configure a dedicated printer listener, set its port to `8443` and
-enable the `8443/tcp` mapping before pairing. If you turn on HTTPS for the
-web app, open its `https://` address directly.
+
+Use the first-run wizard's encryption step to turn on HTTPS for the web app
+or TLS for the printers. For a dedicated printer listener, choose port
+`8443` in the wizard and enable the `8443/tcp` mapping before pairing.
+If you enable web HTTPS, open the app's `https://` address directly.
 
 ## Back up and update
 
-The app stores its default configuration, database and print files in
-`/data/prusa-connect`. Home Assistant includes them in backups of the app.
-Keep file and database paths within that folder when you change them.
+The app stores its configuration, database and print files in its private
+`/data/prusa-connect` folder. Home Assistant includes the folder in app
+backups. A host administrator can edit `config.yaml` inside the app
+container and restart the app for advanced changes after setup.
+Keep file and database paths within the app's data folder.
 
 Back up the app before replacing its files in `local_apps`. Reload the app
 store and apply the update. For an archive with the same app version, use

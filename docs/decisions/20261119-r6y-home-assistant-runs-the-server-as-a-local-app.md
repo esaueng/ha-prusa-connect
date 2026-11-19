@@ -30,8 +30,9 @@ address that it can reach without a Home Assistant session.
    mapping for a dedicated printer listener on port `8443`.
 3. Start the server as its own unprivileged user in `/data/prusa-connect`.
    Keep its default configuration, database and files there.
-4. Update the server through the Home Assistant app. Use cold backups, which
-   stop the server while Home Assistant copies the data.
+4. Replace the app archive to update the server. Apply the update or rebuild
+   the app in Home Assistant. Use cold backups, which stop the server while
+   Home Assistant copies the data.
 
 ## enforcement
 
@@ -43,5 +44,5 @@ registration survive replacement of the container.
 
 | option | why not |
 |---|---|
-| Embedded Home Assistant integration | Its default release source serves Prusa's upstream binaries |
+| Embedded Home Assistant integration | The fork would need its own signed releases to use this installer |
 | Prebuilt image in a registry | Installing the app would depend on publishing the image before each version update |
