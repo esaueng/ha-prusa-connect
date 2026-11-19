@@ -8,6 +8,10 @@ compose() {
   docker compose --project-name "$project" --file "$work/compose.yaml" "$@"
 }
 cleanup() {
+  if [ "$?" -ne 0 ]; then
+    compose ps -a >&2 || true
+    compose logs --no-color | grep -E ' \| (cp:|install:|setpriv:)' >&2 || true
+  fi
   compose down --volumes >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -51,6 +55,8 @@ start_app --build
 wait_for_setup pending
 curl -fsS "$origin/" | grep -F '<html' >/dev/null
 curl -fsS "$origin/api/v1/health" | jq -ec 'select(.status == "ok" and (.version | length > 0)) | {status,version}'
+compose exec -T ha-prusa-connect setpriv --reuid=prusa --regid=prusa --clear-groups \
+  test -r /etc/ssl/certs/ca-certificates.crt
 # shellcheck disable=SC2016 # Expand process paths inside the container.
 compose exec -T ha-prusa-connect sh -ec '
   for process in /proc/[0-9]*; do
