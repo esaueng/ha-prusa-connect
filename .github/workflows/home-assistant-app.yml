@@ -1,0 +1,39 @@
+name: Home Assistant app
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package and test ${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Package the app
+        run: sh scripts/package-home-assistant.sh ${{ matrix.arch }} "$RUNNER_TEMP/home-assistant"
+
+      - name: Test the app
+        run: bash scripts/check-home-assistant-app.sh "$RUNNER_TEMP/home-assistant/ha-prusa-connect-${{ matrix.arch }}.tar.gz"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ha-prusa-connect-${{ matrix.arch }}
+          path: ${{ runner.temp }}/home-assistant/ha-prusa-connect-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error

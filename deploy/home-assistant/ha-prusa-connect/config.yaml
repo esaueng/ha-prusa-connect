@@ -1,0 +1,20 @@
+name: ha-prusa-connect
+description: Self-hosted printer management built on Prusa Connect by Prusa Research.
+version: "0.1.0"
+slug: ha-prusa-connect
+url: https://github.com/esaueng/ha-prusa-connect
+arch: [amd64, aarch64]
+startup: application
+boot: auto
+timeout: 30
+backup: cold
+ports:
+  8080/tcp: 8080
+  8443/tcp: null
+ports_description:
+  8080/tcp: Web app and default printer port
+  8443/tcp: Optional dedicated printer port
+webui: "http://[HOST]:[PORT:8080]"
+watchdog: "tcp://[HOST]:8080"
+options: {}
+schema: {}

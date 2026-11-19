@@ -39,6 +39,7 @@ needs a fix.
 | `config/` | the shipped default configuration and example profiles |
 | `docker/` | one directory per service: its definition, its local overrides, its Dockerfile |
 | `deploy/kubernetes/` | the manifests for one instance |
+| `deploy/home-assistant/` | the [local app for Home Assistant OS](../deploy/home-assistant/ha-prusa-connect/README.md) |
 | `deploy/systemd/` | the systemd unit that runs a release binary as a service on Linux |
 | `docs/` | every document. See the two tables below |
 | `.agents/rules/` | the binding rules |

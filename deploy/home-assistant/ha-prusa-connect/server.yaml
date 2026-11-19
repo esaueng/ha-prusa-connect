@@ -1,0 +1,5 @@
+core:
+  discovery:
+    enabled: false
+  upgrade:
+    enabled: false
