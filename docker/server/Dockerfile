@@ -176,6 +176,13 @@ RUN TAGS="$(go run ./cmd/detect-build-tags --config "$CONFIG_FILE" --variant ful
     -ldflags="-X github.com/prusa3d/prusa-connect/internal/kernel/version.stamped=${BUILD_VERSION} -X github.com/prusa3d/prusa-connect/internal/kernel/version.docsURL=${DOCS_URL} -X github.com/prusa3d/prusa-connect/internal/upgrade.officialPublicKeys=${UPGRADE_PUBLIC_KEYS}" \
     -o /prusa_connect ./cmd/prusa-connect
 
+FROM scratch AS home-assistant-files
+COPY --from=builder /prusa_connect /prusa_connect
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+FROM builder AS extension-packager
+ARG TARGETOS TARGETARCH TARGETVARIANT
+
 # The parts release, laid out by the script its own gate packs with. Its Go
 # module binds the sdk to this checkout through a replace, and its two
 # database drivers are at the versions the core pins, which `go mod download`
@@ -244,12 +251,12 @@ COPY --from=builder /prusa_connect /prusa_connect
 # offers each, and switching one on installs a copy into `core.modules`. Owned
 # by root, readable by the runtime user, because nothing writes here.
 COPY --from=extensions-builder /app/extensions/fleet-stats/ui/dist /opt/modules/fleet-stats
-COPY --from=builder /opt/modules/parts /opt/modules/parts
-COPY --from=builder /opt/modules/buddy-debug-logs /opt/modules/buddy-debug-logs
-COPY --from=builder /opt/modules/threemf /opt/modules/threemf
-COPY --from=builder /opt/modules/server-slicing /opt/modules/server-slicing
-COPY --from=builder /opt/modules/materials /opt/modules/materials
-COPY --from=builder /opt/modules/fractal /opt/modules/fractal
+COPY --from=extension-packager /opt/modules/parts /opt/modules/parts
+COPY --from=extension-packager /opt/modules/buddy-debug-logs /opt/modules/buddy-debug-logs
+COPY --from=extension-packager /opt/modules/threemf /opt/modules/threemf
+COPY --from=extension-packager /opt/modules/server-slicing /opt/modules/server-slicing
+COPY --from=extension-packager /opt/modules/materials /opt/modules/materials
+COPY --from=extension-packager /opt/modules/fractal /opt/modules/fractal
 
 # The root certificates the server verifies an https peer against: the module
 # marketplace, the releases it points at, and an OIDC provider. trixie-slim
