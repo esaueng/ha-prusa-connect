@@ -31,6 +31,6 @@ docker buildx build --platform "linux/$docker_arch" --target home-assistant-file
     --output "type=local,dest=$package/rootfs" .
 
 archive=$app-$1.tar.gz
-COPYFILE_DISABLE=1 tar -czf "$staging/$archive" -C "$staging" "$app"
+COPYFILE_DISABLE=1 tar --numeric-owner -czf "$staging/$archive" -C "$staging" "$app"
 mv "$staging/$archive" "$output/$archive"
 printf '%s\n' "$output/$archive"
