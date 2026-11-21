@@ -89,8 +89,25 @@ func routes(schema *graphql.Schema) http.Handler {
 // The status is 200 for every query the schema could run, including one whose
 // fields were refused: GraphQL puts a refusal in the errors list beside
 // whatever data did resolve, and a client reads both. A request that never
-// became a query is refused earlier, with a status of its own.
+// became a query, a write sent as a GET and a query over the bounds in
+// limits.go are refused before it runs, each with a status of its own.
 func execute(w http.ResponseWriter, r *http.Request, schema *graphql.Schema, asked request) {
+	if document := parsed(asked.Query); document != nil {
+		if r.Method == http.MethodGet && writesOverGet(document, asked.Operation) {
+			w.Header().Set("Allow", http.MethodPost)
+			problem(w, http.StatusMethodNotAllowed, "graphql/METHOD_NOT_ALLOWED",
+				"a GraphQL write is sent as a POST", errWriteOverGet.Error())
+
+			return
+		}
+
+		if err := bound(document); err != nil {
+			refuseRequest(w, err)
+
+			return
+		}
+	}
+
 	// The principal is the host's answer about who is calling, taken off the
 	// request the host handed over. It is never a header the caller wrote, and
 	// it is what every wire call the resolvers make is authorized as.
@@ -160,8 +177,12 @@ func hold(asked request) error {
 // refuseRequest answers a request that never became a query.
 func refuseRequest(w http.ResponseWriter, err error) {
 	code := "graphql/REQUEST_INVALID"
-	if errors.Is(err, errQueryTooLong) {
+
+	switch {
+	case errors.Is(err, errQueryTooLong):
 		code = "graphql/QUERY_TOO_LONG"
+	case errors.Is(err, errQueryTooComplex):
+		code = "graphql/QUERY_TOO_COMPLEX"
 	}
 
 	problem(w, http.StatusBadRequest, code, "the request is not a GraphQL request", err.Error())
