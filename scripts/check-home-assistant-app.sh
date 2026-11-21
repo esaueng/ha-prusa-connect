@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'printf "Home Assistant smoke test failed at line %s.\n" "$LINENO" >&2' ERR
 
 archive=${1:?Usage: $0 <app archive>}
 work=$(mktemp -d)
@@ -84,7 +85,9 @@ sign_in() {
 }
 sign_in
 printf 'G28\n' > "$work/sample.gcode"
-curl -fsS -b "$work/cookies" -H 'Content-Type: application/octet-stream' -T "$work/sample.gcode" \
+# Storage can still be starting after required modules are ready.
+curl -fsS --retry 10 --retry-delay 1 -b "$work/cookies" \
+  -H 'Content-Type: application/octet-stream' -T "$work/sample.gcode" \
   "$origin/api/v1/storages/local/content?path=sample.gcode" >/dev/null
 curl -fsS -D "$work/printer-headers" -o /dev/null -H 'Content-Type: application/json' \
   --data-binary '{"sn":"APP-SMOKE","fingerprint":"APP-SMOKE-1","printer_type":"1.4.0","firmware":"6.4.0"}' \
