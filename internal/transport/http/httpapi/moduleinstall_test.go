@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/prusa3d/prusa-connect/internal/authz"
 	"github.com/prusa3d/prusa-connect/internal/kernel/ref"
+	"github.com/prusa3d/prusa-connect/sdk/fault"
 )
 
 // What the old backlog asks of the install surface: the three addresses answer,
@@ -252,6 +254,75 @@ func TestACallerWhoAdministersNoKindStagesNothing(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 	require.Empty(t, installer.releases, "the release was staged for a caller the graph refused")
+}
+
+// oneKindGrants is a caller who administers the sink kind and nothing else.
+// It holds no admin role on the organization, so the graph refuses its read of
+// the organization's grants.
+type oneKindGrants struct{ *fakeGrantStore }
+
+func (oneKindGrants) Can(
+	_ context.Context, _ authz.Subject, action authz.Action, object authz.Object,
+) (bool, error) {
+	return action == authz.ActionConfigureResource && object.String() == "resource_kind:sink", nil
+}
+
+func (oneKindGrants) Grants(context.Context, authz.Subject, authz.Object) ([]authz.Tuple, error) {
+	return nil, fault.New(authz.CodeAccessDenied(), "the subject holds no admin role on this org")
+}
+
+// A caller who administers one kind may not name where a release comes from.
+// Such a release runs as this server's own user and its manifest names the
+// kind, so a URL or a path would let that caller run any program here. The
+// refusal comes before the installer reads anything, so the answer is the same
+// whether the path exists or not.
+func TestACallerWhoAdministersOneKindMayNotNameAReleasesAddress(t *testing.T) {
+	t.Parallel()
+
+	for name, from := range map[string]string{
+		"a URL":                       "https://releases.example/spools-1.0.0.tar.gz",
+		"a path that exists":          "/etc",
+		"a path that does not exist":  "/no/such/release",
+		"a path with spaces around":   "  /srv/releases/spools  ",
+		"a relative path on the host": "releases/spools",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			installer := &recordingInstaller{installed: ModuleInstallation{Instance: "sink:spools"}}
+			handler := serverWithInstaller(t, installer, oneKindGrants{&fakeGrantStore{}}).Handler()
+
+			body, err := json.Marshal(ModuleRelease{
+				Module: "github.com/acme/spools", Version: "1.0.0", From: from,
+				Sha256: strings.Repeat("a", 64), Approve: true,
+			})
+			require.NoError(t, err)
+
+			rec := call(t, handler, http.MethodPost, "/api/v1/modules", string(body))
+
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "ACCESS_DENIED")
+			require.Contains(t, rec.Body.String(), "org:local")
+			require.Empty(t, installer.releases, "the installer read a release a one-kind caller named")
+		})
+	}
+}
+
+// The same caller may still install what the marketplace offers, which an
+// organization administrator chose. The installer then holds the manifest's
+// kind to the caller's grants.
+func TestACallerWhoAdministersOneKindMayInstallFromTheMarketplace(t *testing.T) {
+	t.Parallel()
+
+	installer := &recordingInstaller{installed: ModuleInstallation{Instance: "sink:spools"}}
+	handler := serverWithInstaller(t, installer, oneKindGrants{&fakeGrantStore{}}).Handler()
+
+	rec := call(t, handler, http.MethodPost, "/api/v1/modules",
+		`{"module":"github.com/acme/spools","version":"1.0.0","approve":true}`)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Len(t, installer.releases, 1)
+	require.Empty(t, installer.releases[0].From)
 }
 
 func TestUninstallingAModuleNamesTheNamespaceItWasAskedFor(t *testing.T) {

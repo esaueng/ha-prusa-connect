@@ -142,9 +142,8 @@ func unservedMount(instance ref.Ref, mount, reason string) httpapi.ModuleSurface
 }
 
 // mountReasonFor says why one supervised module is not answering. It names
-// the lifecycle state and no path or digest. An unauthenticated caller can
-// read this refusal, and a path or a digest would show how the server's disk
-// is laid out.
+// the lifecycle state and no path or digest, so an identified caller without
+// module access never sees how the server's disk is laid out.
 func mountReasonFor(running *instance) string {
 	return "the module is switched on and is not serving. Its instance is " +
 		running.runner.Status().State.String() +

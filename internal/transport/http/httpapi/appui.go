@@ -44,6 +44,25 @@ const (
 	appFileCacheControl = "public, max-age=3600"
 )
 
+// The headers every answer of the app carries, so no other site can frame it
+// and a page of the app cannot be turned against its own origin.
+//
+// The policy leaves script, style and connect sources alone. A module's bundle
+// is loaded at run time from this origin, and the app reaches the event stream
+// and WebRTC from it, so a source list here would break a module that worked.
+//
+// Referrer-Policy is not no-referrer. Under no-referrer a browser sends
+// Origin: null on a POST to this same origin, and a proxy that checks the
+// origin of a write would refuse every one.
+const (
+	appContentSecurityPolicy = "frame-ancestors 'none'; object-src 'none'; base-uri 'none'"
+	appReferrerPolicy        = "strict-origin-when-cross-origin"
+	// appStrictTransport is sent only on an answer that came over TLS. A
+	// printer on a local network is often reached over plain HTTP, and the
+	// header on that answer would lock its browser out of the server.
+	appStrictTransport = "max-age=31536000; includeSubDomains"
+)
+
 // appMountReason is why the origin root is not an operation. A browser
 // navigation is not a call a generated client makes, and the addresses under it
 // are the app's own router's, not this server's.
@@ -86,6 +105,8 @@ func AppHandler(files fs.FS) http.Handler {
 	slots := make(chan struct{}, appDecompressSlots)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setAppSecurityHeaders(w, r)
+
 		// A trailing slash is how a browser writes a route's directory form,
 		// and an fs name never carries one.
 		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/")
@@ -120,6 +141,19 @@ func AppHandler(files fs.FS) http.Handler {
 
 		writeAppFile(w, r, files, served, etags(), slots)
 	})
+}
+
+// setAppSecurityHeaders sets the security headers on every answer of the app,
+// a refusal as well, before anything is written.
+func setAppSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	header := w.Header()
+	header.Set("Content-Security-Policy", appContentSecurityPolicy)
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("Referrer-Policy", appReferrerPolicy)
+
+	if r.TLS != nil {
+		header.Set("Strict-Transport-Security", appStrictTransport)
+	}
 }
 
 // Decompression for a client without gzip holds about 100 KB for as long as

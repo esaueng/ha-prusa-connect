@@ -137,17 +137,25 @@ func (s *Server) mountModules(cfg Config) {
 //
 // The order matters. The namespace is checked against the grammar first. A
 // segment no module could have is an unrouted path, and the answer must not
-// say a module was looked for. The claim is resolved next, and an unclaimed
-// namespace answers exactly as an unrouted path does. Identity and the
-// permission come last, before anything of the module's runs, so a caller who
-// holds nothing never reaches the module. A module reached before the check
-// would already have read the request and done the work.
+// say a module was looked for. The caller is identified next, before the claim
+// is resolved. A caller with no identity then gets the same 401 for a claimed
+// namespace and an unclaimed one, so it cannot list the modules a deployment
+// runs. An unclaimed namespace answers an identified caller exactly as an
+// unrouted path does. The permission comes last, before anything of the
+// module's runs, so a caller who holds nothing never reaches the module. A
+// module reached before the check would already have read the request and
+// done the work.
 func (s *Server) moduleHandler(cfg Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		namespace := chi.URLParam(r, namespaceParam)
 		if extension.Namespace(namespace).Validate() != nil {
 			notFound(w, r)
 
+			return
+		}
+
+		caller, identified := s.identifyModuleCaller(w, r, cfg)
+		if !identified {
 			return
 		}
 
@@ -180,8 +188,7 @@ func (s *Server) moduleHandler(cfg Config) http.Handler {
 			return
 		}
 
-		caller, allowed := s.allowModule(w, r, cfg, surface)
-		if !allowed {
+		if !s.allowModule(w, r, cfg, caller, surface) {
 			return
 		}
 
@@ -193,30 +200,34 @@ func (s *Server) moduleHandler(cfg Config) http.Handler {
 	})
 }
 
-// allowModule resolves the caller and asks the graph, writing the refusal
-// itself and reporting whether the module may be reached.
+// identifyModuleCaller resolves who is calling, writing the refusal itself and
+// reporting whether the caller has an identity.
+func (s *Server) identifyModuleCaller(w http.ResponseWriter, r *http.Request, cfg Config) (Caller, bool) {
+	caller, err := cfg.Principals.Caller(r)
+	if err != nil {
+		logRefusal(r.Context(), s.logger, r.URL.Path, err)
+
+		writeProblem(w, r, identityFault(err))
+
+		return Caller{}, false
+	}
+
+	return caller, true
+}
+
+// allowModule asks the graph whether caller may reach the module, writing the
+// refusal itself and reporting whether the module may be reached.
 //
 // A server with a module plane and no graph refuses everything. New will not
 // build such a server, and the check is here anyway, because without it a
 // missing graph would open the module surface to anybody.
 func (s *Server) allowModule(
-	w http.ResponseWriter, r *http.Request, cfg Config, surface ModuleSurface,
-) (Caller, bool) {
-	caller, err := cfg.Principals.Caller(r)
-	if err != nil {
-		refusal := identityFault(err)
-
-		logRefusal(r.Context(), s.logger, r.URL.Path, err)
-
-		writeProblem(w, r, refusal)
-
-		return Caller{}, false
-	}
-
+	w http.ResponseWriter, r *http.Request, cfg Config, caller Caller, surface ModuleSurface,
+) bool {
 	if cfg.ModuleAccess == nil {
 		writeProblem(w, r, httpfault.Unexpected("no authorization graph stands behind this module"))
 
-		return Caller{}, false
+		return false
 	}
 
 	// The principal is parsed and not assumed to be a user. The Principals
@@ -226,7 +237,7 @@ func (s *Server) allowModule(
 	if err != nil {
 		writeProblem(w, r, moduleFault(err))
 
-		return Caller{}, false
+		return false
 	}
 
 	if err = cfg.ModuleAccess.RequireResource(
@@ -234,10 +245,10 @@ func (s *Server) allowModule(
 	); err != nil {
 		writeProblem(w, r, moduleFault(err))
 
-		return Caller{}, false
+		return false
 	}
 
-	return caller, true
+	return true
 }
 
 // mountedRequest takes the mount prefix off, and reports false for a path that

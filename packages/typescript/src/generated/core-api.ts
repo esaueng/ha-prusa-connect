@@ -309,7 +309,7 @@ export interface paths {
         };
         /**
          * Start a login
-         * @description Redirects to the configured issuer with a fresh state, nonce and PKCE challenge. The verifier stays on this server, which is what binds the callback to the request that started it. A deployment with no issuer refuses here rather than admitting the caller.
+         * @description Redirects to the configured issuer with a fresh state, nonce and PKCE challenge. The verifier stays on this server, which is what binds the callback to the request that started it. A deployment with no issuer refuses here rather than admitting the caller. One address may start 30 logins in ten minutes. Past that, or while the server holds as many unfinished logins as it will, the answer is 429 with Retry-After.
          */
         get: operations["begin-login"];
         put?: never;
@@ -1803,7 +1803,7 @@ export interface paths {
          *
          *     An update is kept only when the new release starts. The release it replaces is kept aside until then, and the answer waits up to a minute, because a module may migrate a database of its own before it reports ready. A new release that fails to start, such as one whose migration failed or one older than its database allows, is taken back: the old files, declaration and grants return, the old release runs again, and the answer is MODULE_UPDATE_ROLLED_BACK with the cause in reason. A migration that fails is undone whole, so the database is as it was. `schema_version` and `migrations` say what a start that succeeded did to the module's own database.
          *
-         *     It takes configure_resource on the resource kind the manifest declares, which is the permission to administer that part of this server's configuration.
+         *     It takes configure_resource on the resource kind the manifest declares, which is the permission to administer that part of this server's configuration. Naming `from` takes the admin role on the organization.
          */
         post: operations["install-module"];
         delete?: never;
@@ -9554,6 +9554,15 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -342,17 +342,19 @@ func registerRevokeCredential(api huma.API, cfg Config) {
 			return nil, credentialFault(err, "find the credential")
 		}
 
+		// Another principal's credential is refused as an unknown id, so a
+		// caller cannot tell an id somebody holds from one nobody does.
+		if held.Subject != who.String() {
+			if adminErr := requireAccountAdmin(ctx, cfg); adminErr != nil {
+				return nil, hideOthersCredential(adminErr, in.Credential)
+			}
+		}
+
 		// Revoking another credential is administering access, so a
 		// credential limited below administer may end itself and nothing
 		// else. An app that is done with its token can still drop it.
 		if authz.ScopesFrom(ctx) != nil && cfg.Credentials.Presented(requestFrom(ctx)) != held.ID {
 			return nil, authz.RefuseBelowAdminister()
-		}
-
-		if held.Subject != who.String() {
-			if adminErr := requireAccountAdmin(ctx, cfg); adminErr != nil {
-				return nil, adminErr
-			}
 		}
 
 		if err = cfg.Credentials.Revoke(ctx, in.Credential); err != nil {
@@ -361,6 +363,16 @@ func registerRevokeCredential(api huma.API, cfg Config) {
 
 		return &revokeCredentialOutput{Status: http.StatusNoContent}, nil
 	})
+}
+
+// hideOthersCredential turns a refusal to administer accounts into the answer
+// an id no row has. A failure of the graph is not a refusal and stays as it is.
+func hideOthersCredential(err error, id string) error {
+	if raised, ok := errors.AsType[*fault.Fault](err); ok && raised.Code() == authz.CodeAccessDenied() {
+		return UnknownCredential(id)
+	}
+
+	return err
 }
 
 // credentialSubject resolves whose credentials a request is about, and decides
