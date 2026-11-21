@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
           if [ "$main_sha" != "$GITHUB_SHA" ]; then
-            echo 'Main has advanced. Publish from a build of the current main commit.'
+            echo '::notice::Main changed during this build. The next build of main can publish a release.'
             exit 0
           fi
 
