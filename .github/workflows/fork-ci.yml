@@ -64,8 +64,12 @@ jobs:
         BASE: ${{ github.event.pull_request.base.sha }}
       run: sh extensions/scripts/check-version-bump.sh "$BASE"
 
+    # On a pull request, style checks 12 to 14 refuse a file that got worse
+    # than on the target branch. Without a base they only report.
     - name: Repository gates
       if: ${{ !cancelled() }}
+      env:
+        WRITING_STYLE_BASE: ${{ github.event.pull_request.base.sha }}
       run: |
         make style-check
         make makefile-check
@@ -144,9 +148,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
-      AUTHZ_REQUIRED_ENGINES: sqlite,postgres
     steps:
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
@@ -159,11 +160,21 @@ jobs:
 
     - name: Run the ${{ matrix.shard }} shard
       if: ${{ matrix.shard != 'modules' }}
+      env:
+        AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
+        AUTHZ_REQUIRED_ENGINES: sqlite,postgres
       run: make test-shard SHARD=${{ matrix.shard }}
 
-    # The modules beside the core, and the printer build's tags.
-    - name: Run the sdk, packages and printer-build tests
+    # The adapter suites and the MQTT tool topics against real brokers, which
+    # the target starts in Docker. Without them those tests skip.
+    - name: Run the adapter tests against real brokers
       if: ${{ matrix.shard == 'modules' }}
+      run: make test-adapters
+
+    # The modules beside the core, and the printer build's tags. The printer
+    # build has no Postgres driver, so it gets no AUTHZ_REQUIRED_ENGINES.
+    - name: Run the sdk, packages and printer-build tests
+      if: ${{ !cancelled() && matrix.shard == 'modules' }}
       run: |
         (cd sdk && go test -short ./...)
         for mod in packages/*/go.mod; do
@@ -221,6 +232,18 @@ jobs:
         make install-docs-deps
         make docs-check
 
+    # A committed AsyncAPI reference page that differs from what the generator
+    # writes fails here.
+    - name: The generated AsyncAPI pages are up to date
+      if: ${{ !cancelled() }}
+      working-directory: docs
+      run: |
+        pnpm run generate:protocol-reference-pages
+        if ! git diff --exit-code -- src/content/docs/mqtt-asyncapi.mdx src/content/docs/sse-asyncapi.mdx; then
+          echo "::error::Run 'pnpm run generate:protocol-reference-pages' in docs/ and commit the result."
+          exit 1
+        fi
+
   extensions:
     name: Extensions
     runs-on: ubuntu-latest
@@ -246,7 +269,8 @@ jobs:
         persist-credentials: false
 
     # A pull request checks the extensions it changes, or every extension when
-    # it changes sdk/. A push to main checks every extension.
+    # it changes code they build against: the sdk, the client packages, the
+    # core, the toolchain or the lint rules. A push to main checks every one.
     - name: Choose the extensions to check
       id: plan
       env:
@@ -254,7 +278,9 @@ jobs:
       run: |
         set -eu
         all=$(cd extensions && for m in */module.yaml; do dirname "$m"; done | tr '\n' ' ')
-        if [ -z "$BASE" ] || git diff --name-only "$BASE" HEAD -- sdk/ extensions/scripts/ extensions/extension.mk extensions/Makefile | grep -q .; then
+        if [ -z "$BASE" ] || git diff --name-only "$BASE" HEAD -- sdk/ packages/svelte/ packages/typescript/ packages/standards/ \
+            internal/ cmd/ go.mod go.sum .nvmrc Makefile .golangci.yml \
+            extensions/scripts/ extensions/extension.mk extensions/Makefile | grep -q .; then
           picked=$all
         else
           picked=""
