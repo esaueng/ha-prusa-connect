@@ -146,6 +146,15 @@ func (e *device) record(patch connectorapi.StatePatch) (connectorapi.StatePatch,
 	return patch, true
 }
 
+// stateText is the state the device reported last, such as READY, and empty
+// before it reported one.
+func (e *device) stateText() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return jobText(e.state[printerStatePath])
+}
+
 // writePathLocked stores one bounded value, and refuses a path this tree does
 // not already hold once the budget is spent. It reports whether it stored one.
 func (e *device) writePathLocked(path string, value json.RawMessage) bool {

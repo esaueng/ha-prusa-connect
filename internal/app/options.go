@@ -49,6 +49,9 @@ type Options struct {
 	// backupRestore records a restore request and stops the composed process so
 	// no open database handle can race restoration.
 	backupRestore func(string) error
+	// appMount builds the mount that serves the core's app. Nil is
+	// httpapi.AppMount. Tests set it to serve a fixture bundle.
+	appMount appMounter
 	// Stderr is where the setup code is printed for a person to read. Nil is
 	// the process's own standard error.
 	Stderr io.Writer

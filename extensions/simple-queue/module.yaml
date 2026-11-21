@@ -1,0 +1,122 @@
+# The one manifest for both halves of this module: the Go process in main.go
+# and the browser bundle under ui/.
+#
+# This file names no namespace. The host derives the namespace from the module
+# path the operator installed, so a module cannot take the address of another
+# module.
+
+name: simple-queue
+# The two keys an extensions page prints on the card, beside the version.
+title: Print queue
+summary: A queue of print files for each printer. The next file starts when the bed is clear.
+codeowner: Prusa Research
+# The kind the one instance is declared under. It offers the service runtime,
+# which a module with a process half needs.
+kind: sink
+version: 0.1.0
+license: OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1
+# The major version of the protocol between this process and the host.
+contract_major: 1
+# Where the fragment describing the routes is, inside this repository.
+openapi: openapi.json
+
+# What this module cannot run without: the wire methods it calls. A server
+# that serves none of them would start a queue that can neither keep its
+# files nor print them. The core must also answer cached folder reads,
+# upload to a printer from a module tab, tell a person from a service
+# account, say what a printer accepts and whether it is ready, publish a printer's state
+# change, and keep both files on a print. No core before 0.1.0-beta.2 does
+# all of these.
+require:
+  core: ">=0.1.0-beta.2"
+  core-device.list: "*"
+  core-device.get: "*"
+  core-device.jobs: "*"
+  core-device.files: "*"
+  core-device.print: "*"
+  core-device.command: "*"
+  core-storage.stat: "*"
+  core-access.check: "*"
+  core-bus.subscribe: "*"
+
+# The queues are kept in a database of the module's own: SQLite in its data
+# directory unless the operator names another at install.
+needs:
+  database: true
+
+# What the module does as itself. It watches every printer it has a queue for
+# and follows the prints it sent, which takes observe. It starts the next file
+# on a printer a person made ready, which takes operate on that printer, and
+# it reads the file it sends, which takes read_storage.
+#
+# Installing with -approve grants observe and read_storage on the whole
+# organization, and not operate. A person who may share the printer allows
+# the queue to start prints on it from the queue's tab. Until then the queue
+# starts a file only when a person presses Print.
+permissions:
+  - observe
+  - operate
+  - read_storage
+
+# Before the queue starts a file by itself, it asks whether the person who
+# added it may still print on the printer and read the file. That person is
+# usually not signed in at that moment.
+check_absent_people: true
+
+# The settings this module reads, with the default of each.
+#
+# README.md has the same table. manifest_test.go fails when the two differ.
+options:
+  - key: max_waiting
+    type: int
+    default: "30"
+    summary: How many files may wait in one printer's queue, from 1 to 60.
+  - key: keep_history
+    type: int
+    default: "10"
+    summary: How many ended prints each queue keeps, from 0 to 30.
+  - key: send_timeout
+    type: string
+    default: 2h15m
+    summary: How long a file may be on its way to the printer before the queue gives it back, from 5m to 24h.
+
+platforms:
+  - linux_amd64
+  - linux_arm64
+  - darwin_amd64
+  - darwin_arm64
+  - windows_amd64
+
+ui:
+  # The built bundle, relative to the bundle root.
+  entry: ui/index.js
+  # The range of @prusa/connect-ui this bundle was built against.
+  library: ">=0.0.1 <1.0.0"
+  contributes:
+    pages:
+      - path: queue
+        title: Print queue
+        icon: calendar-clock
+    device_tab:
+      - id: queue
+        title: Queue
+    device_card:
+      - id: queue
+        title: Queue
+    print_section:
+      - id: queue
+        title: Add to queue
+    # A file already on a printer has no print dialog, so its own menu on the
+    # printer's Files tab offers the same.
+    device_file_action:
+      - id: queue
+        title: Add to queue
+        icon: calendar-clock
+        file_types: [".bgcode", ".gcode", ".gco", ".g"]
+    # A file dropped on a printer's page is copied to the printer and waits in
+    # that printer's queue from the moment the copy starts.
+    device_upload_action:
+      - id: queue
+        title: Add to queue
+        icon: calendar-clock
+        file_types: [".bgcode", ".gcode", ".gco", ".g"]

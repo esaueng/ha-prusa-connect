@@ -18,6 +18,7 @@ export const PRINTER_FIELDS = [
   'remaining',
   'nozzle',
   'bed',
+  'chamber',
   'material',
   'issue',
 ] as const;
@@ -41,8 +42,8 @@ export type Scope = (typeof SCOPES)[number];
 export const SIZES = ['tile', 'row'] as const;
 export type Size = (typeof SIZES)[number];
 
-/** The heaters a chart can draw. */
-export const HEATERS = ['nozzle', 'bed'] as const;
+/** The heaters a chart can draw. Only an enclosed printer has a chamber. */
+export const HEATERS = ['nozzle', 'bed', 'chamber'] as const;
 export type Heater = (typeof HEATERS)[number];
 
 /** How far back a chart reaches, in minutes. */

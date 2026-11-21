@@ -63,6 +63,8 @@ cards:
 | `device-action` | `header-actions` | a `run` function | the device id, as `deviceId` | An item in the action menu at the top of a printer's page. The module runs it with the printer's id. |
 | `camera-section` | `camera-foot` | a component | the camera's name, as `camera` | A section under each camera in a printer's Cameras tab. A module draws nothing for a camera it does not know. |
 | `camera-view` | `camera-picture` | a component | the camera's name, as `camera` | The live view of a camera of a type the module offers, drawn over its picture while a person plays it. |
+| `device-file-action` | `device-file-actions` | a `run` function | the printer file reference `<device id>:<path>`, as `printerFileRef` | An item in the action menu of each file on a printer's Files tab. A folder has none. |
+| `device-upload-action` | `drop-choices` | a `run` function | the printer file reference `<device id>:<path>`, as `printerFileRef` | A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way. |
 
 `device-section`
 
@@ -78,6 +80,7 @@ device_section:
 device_tab:
   - id: my-device-tab
     title: My device tab
+    cross_origin_isolated: false
 ```
 
 `device-action`
@@ -104,6 +107,26 @@ camera_section:
 camera_view:
   - id: my-camera-view
     title: My camera view
+```
+
+`device-file-action`
+
+```yaml
+device_file_action:
+  - id: my-device-file-action
+    title: My device file action
+    icon: blocks
+    destructive: false
+```
+
+`device-upload-action`
+
+```yaml
+device_upload_action:
+  - id: my-device-upload-action
+    title: My device upload action
+    icon: blocks
+    destructive: false
 ```
 
 ## The printer listing

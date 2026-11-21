@@ -125,6 +125,59 @@ func TestThePreviewCacheIsKeyedByTheFileAndNotByItsName(t *testing.T) {
 	require.False(t, ok, "a file of a different length is a different entry")
 }
 
+// A picture that replaces a verdict of no picture grows the cache, so the
+// oldest entry goes when the cache is then over its bound.
+func TestAPictureThatReplacesAVerdictKeepsTheCacheInItsBound(t *testing.T) {
+	t.Parallel()
+
+	cache := newPreviewCache(2048)
+	oldest := previewKey{device: "printer-1", path: "usb/old.gcode", size: 1, modified: 1}
+	taking := previewKey{device: "printer-1", path: "usb/flower.gcode", size: 2, modified: 2}
+
+	cache.put(oldest, printfile.Preview{})
+	cache.put(taking, printfile.Preview{})
+	cache.put(taking, printfile.Preview{Thumbnail: &printfile.Thumbnail{Bytes: make([]byte, 2048)}})
+
+	_, held := cache.get(oldest)
+	require.False(t, held, "the cache went over its bound and dropped nothing")
+
+	found, held := cache.get(taking)
+	require.True(t, held)
+	require.NotNil(t, found.Thumbnail)
+}
+
+// A printer asked about a file it is still taking answers with no picture,
+// under the version the whole file will have. The picture it sends once the
+// file has landed replaces that verdict, and a later answer without one does
+// not take a picture away.
+func TestAPictureReplacesAVerdictOfNoPicture(t *testing.T) {
+	t.Parallel()
+
+	cache := newPreviewCache(config.DefaultPreviewCacheBytes)
+	key := previewKey{device: "printer-1", path: "usb/flower.gcode", size: 3749911, modified: 1}
+	picture := &printfile.Thumbnail{Bytes: []byte("a picture"), MediaType: "image/png", Width: 380, Height: 285}
+
+	cache.put(key, printfile.Preview{})
+
+	found, ok := cache.get(key)
+	require.True(t, ok)
+	require.Nil(t, found.Thumbnail, "the first answer had no picture")
+
+	before := cache.bytes
+	cache.put(key, printfile.Preview{Thumbnail: picture})
+
+	found, ok = cache.get(key)
+	require.True(t, ok)
+	require.Equal(t, picture, found.Thumbnail, "the picture did not replace the verdict of no picture")
+	require.Greater(t, cache.bytes, before, "the picture's bytes are not counted")
+	require.Len(t, cache.order, 1, "one key is one entry")
+
+	cache.put(key, printfile.Preview{})
+
+	found, _ = cache.get(key)
+	require.Equal(t, picture, found.Thumbnail, "an answer without a picture took the picture away")
+}
+
 // Several callers asking for one file at the same moment cost one read of it.
 // A page showing twelve rows of a folder asks for twelve files at once, and
 // without this each row would open and parse the same file again.

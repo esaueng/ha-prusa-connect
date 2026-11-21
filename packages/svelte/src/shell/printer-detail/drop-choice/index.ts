@@ -1,2 +1,2 @@
 export { default as DropChoice } from './drop-choice.svelte';
-export type { DropChoiceProps } from './types';
+export type { DropAction, DropChoiceProps } from './types';

@@ -20,6 +20,7 @@ export const FIELD: Readonly<Record<PrinterField, string>> = {
   remaining: 'dashboard.field.remaining',
   nozzle: 'dashboard.field.nozzle',
   bed: 'dashboard.field.bed',
+  chamber: 'dashboard.field.chamber',
   material: 'dashboard.field.material',
   issue: 'dashboard.field.issue',
 };
@@ -52,6 +53,7 @@ export const SIZE: Readonly<Record<Size, string>> = {
 export const HEATER: Readonly<Record<Heater, string>> = {
   nozzle: 'dashboard.temperature.nozzle',
   bed: 'dashboard.temperature.bed',
+  chamber: 'dashboard.temperature.chamber',
 };
 
 export const NOTE_SIZE: Readonly<Record<NoteSize, string>> = {

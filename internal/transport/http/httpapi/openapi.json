@@ -436,10 +436,6 @@
             "description": "Present while this run is in safe mode: every module is off, whatever the configuration says, until the server restarts normally. It never names who asked for it.",
             "readOnly": true
           },
-          "skin": {
-            "description": "The brand file the component library reads its primary colour out of, named without its .css. \"default\" is the orange seed in the theme itself.",
-            "type": "string"
-          },
           "support_url": {
             "description": "Where the app's Support link points. Empty keeps the assistant on the beta portal.",
             "type": "string"
@@ -463,7 +459,6 @@
           "title",
           "default_language",
           "theme",
-          "skin",
           "printer_admission",
           "printer_custom_ca",
           "dashboards",
@@ -2843,9 +2838,23 @@
             "description": "The name written for a person, absent when the printer reports only one name.",
             "type": "string"
           },
+          "estimated_seconds": {
+            "description": "The print time the slicer estimated, in whole seconds, as the printer read it out of the file. It is present only on the directory of an answer about one print file, and absent for a printer or a file that names none.",
+            "format": "int64",
+            "type": "integer"
+          },
           "folder": {
             "description": "Whether the entry holds other entries.",
             "type": "boolean"
+          },
+          "layer_height_mm": {
+            "description": "The layer height the file was sliced with, in millimetres. Present only on the directory of an answer about one print file that names it.",
+            "format": "double",
+            "type": "number"
+          },
+          "material": {
+            "description": "The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Present only on the directory of an answer about one print file that names it.",
+            "type": "string"
           },
           "modified": {
             "description": "When the entry last changed, as an RFC 3339 string. The printer reports whole seconds, so this value has no fraction of a second. It is absent for a board that reported no timestamp.",
@@ -2858,6 +2867,10 @@
           },
           "path": {
             "description": "The storage-prefixed path, such as usb/models/part.bgcode. It is what the files endpoint takes.",
+            "type": "string"
+          },
+          "printer_model": {
+            "description": "The printer the file was sliced for, such as XL2IS. Present only on the directory of an answer about one print file that names it.",
             "type": "string"
           },
           "read_only": {
@@ -3587,6 +3600,10 @@
       "DevicePrint": {
         "additionalProperties": false,
         "properties": {
+          "keep_both": {
+            "description": "With a storage, send under a free name when the printer holds another file at path, such as usb/part[1].bgcode, keep the printer's file and print the one sent. The answer's path names the file that was started. Refused together with replace.",
+            "type": "boolean"
+          },
           "path": {
             "description": "The file on the printer, storage-prefixed and relative, such as usb/bracket.bgcode. With a storage it is where the file lands; without one it is the file that is printed.",
             "maxLength": 1024,
@@ -4108,6 +4125,10 @@
       "DeviceUpload": {
         "additionalProperties": false,
         "properties": {
+          "keep_both": {
+            "description": "Send under a free name when the printer already holds a file at path, such as usb/part[1].bgcode, and keep the printer's file. The transfer names the path the file lands at. Refused together with replace.",
+            "type": "boolean"
+          },
           "path": {
             "description": "Where the file lands on the printer: storage-prefixed and relative, such as usb/part.bgcode.",
             "maxLength": 1024,
@@ -9283,6 +9304,16 @@
               "null"
             ]
           },
+          "device_file_action": {
+            "description": "An item in the action menu of each file on a printer's Files tab. A folder has none.",
+            "items": {
+              "$ref": "#/components/schemas/ResourceAction"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "device_section": {
             "description": "A section at the foot of a printer's Status tab, after the core's own.",
             "items": {
@@ -9297,6 +9328,16 @@
             "description": "A tab of the module's own on a printer's page, after the core's tabs.",
             "items": {
               "$ref": "#/components/schemas/ResourceSection"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "device_upload_action": {
+            "description": "A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way.",
+            "items": {
+              "$ref": "#/components/schemas/ResourceAction"
             },
             "type": [
               "array",
@@ -10087,6 +10128,10 @@
       "ResourceSection": {
         "additionalProperties": false,
         "properties": {
+          "cross_origin_isolated": {
+            "description": "On a printer tab, true when the module's manifest asks for the tab's page to be cross-origin isolated. The server then sends that page with both isolation headers unless the tab is hidden, and a client opens and leaves the tab with a full page load. Absent otherwise.",
+            "type": "boolean"
+          },
           "devices": {
             "$ref": "#/components/schemas/ResourceDeviceSelector",
             "description": "On a device slot, the devices the entry is drawn for. Absent for every device."
@@ -32939,7 +32984,7 @@
     },
     "/api/v1/ui": {
       "get": {
-        "description": "Reports the name, the fallback language, the theme and the brand file this server's own page draws with, and whether that page is served here at all. It takes no credential, because the page reads it before it paints and before anybody has signed in. It names no account, no printer and no module. It does say whether a new printer waits for a person's approval, which anybody who can reach the printer port learns anyway.",
+        "description": "Reports the name, the fallback language and the theme this server's own page draws with, and whether that page is served here at all. It takes no credential, because the page reads it before it paints and before anybody has signed in. It names no account, no printer and no module. It does say whether a new printer waits for a person's approval, which anybody who can reach the printer port learns anyway.",
         "operationId": "get-ui-settings",
         "responses": {
           "200": {
@@ -32954,7 +32999,6 @@
                   "modules": true,
                   "printer_admission": "approval",
                   "printer_custom_ca": false,
-                  "skin": "default",
                   "theme": "system",
                   "title": "Prusa Connect",
                   "upgrades": true
@@ -33006,7 +33050,7 @@
                       "path": "/api/v1/vocabularies/event-types",
                       "reference": "/docs/event-types/",
                       "summary": "The core event types this build publishes, and the class each one is carried under.",
-                      "version": "3.8.0"
+                      "version": "3.9.0"
                     }
                   ]
                 },
@@ -33640,7 +33684,7 @@
                     }
                   ],
                   "namespace": "com.prusa.connect.",
-                  "version": "3.8.0",
+                  "version": "3.9.0",
                   "vocabulary": "event-types"
                 },
                 "schema": {

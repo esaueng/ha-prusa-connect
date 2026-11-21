@@ -1,8 +1,10 @@
 import type { DataFault, TransferMoved } from '@prusa/connect-ui/data';
 import { flushSync } from 'svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  pendingSendsOf,
+  printFirst,
   Sends,
   type SendsRunning,
   type SendsStorage,
@@ -24,6 +26,11 @@ const fakes = () => {
   const uploads: Upload[] = $state([]);
   let finishUpload:
     ((ok: boolean, state?: Upload['state']) => void) | undefined;
+  // Every upload still going up, by its path, to end one out of turn.
+  const finishUploads = new Map<
+    string,
+    (ok: boolean, state?: Upload['state']) => void
+  >();
   // Like the Storage store, a second upload of the same key aborts the first,
   // which answers undefined and records nothing.
   const pending = new Map<string, () => void>();
@@ -52,7 +59,10 @@ const fakes = () => {
         };
         uploads.push(row);
         const live = uploads[uploads.length - 1]!;
-        finishUpload = (ok, state = ok ? 'done' : 'failed') => {
+        const finish = (
+          ok: boolean,
+          state: Upload['state'] = ok ? 'done' : 'failed',
+        ) => {
           pending.delete(key);
           live.state = state;
           live.fault =
@@ -61,9 +71,14 @@ const fakes = () => {
               : undefined;
           resolve(ok ? { bytes: body.size, path } : undefined);
         };
+        finishUpload = finish;
+        finishUploads.set(path, finish);
       }),
-    cancelUpload: () => {
-      finishUpload?.(false, 'cancelled');
+    // Cancels the upload of that path, as the Storage store does, and the
+    // latest one when the path is not known.
+    cancelUpload: (_storage, path) => {
+      const finish = finishUploads.get(path) ?? finishUpload;
+      finish?.(false, 'cancelled');
     },
     uploadTemporary: (storage, name, body, onProgress, signal) =>
       new Promise((resolve) => {
@@ -105,7 +120,13 @@ const fakes = () => {
   const keyOf = (moved: TransferMoved): string =>
     [moved.deviceId, moved.storage, moved.source, moved.path].join('|');
   const stopped: string[] = [];
+  // Who waits for a file to be on its way, by the stored file's path.
+  const itsWay: { source: string; run: (path: string) => void }[] = [];
   const stopping: string[] = $state([]);
+  // Transfers the server ended whose settled frame never came, and how often
+  // the running transfers were read again.
+  const ended = new Set<string>();
+  let reads = 0;
   const running: SendsRunning = {
     get rows() {
       return rows;
@@ -123,11 +144,26 @@ const fakes = () => {
       const at = landed.indexOf(keyOf(moved));
       if (at >= 0) landed.splice(at, 1);
     },
+    whenOnItsWay: (sent, run) => {
+      itsWay.push({ source: sent.source, run });
+    },
+    notOnItsWay: (sent) => {
+      const at = itsWay.findIndex((one) => one.source === sent.source);
+      if (at >= 0) itsWay.splice(at, 1);
+    },
     stop: (id) => {
       stopped.push(id);
       return Promise.resolve();
     },
     stopping: (id) => stopping.includes(id),
+    load: () => {
+      reads += 1;
+      for (let at = rows.length - 1; at >= 0; at -= 1) {
+        if (ended.has(rows[at]!.transferId)) rows.splice(at, 1);
+      }
+
+      return Promise.resolve();
+    },
   };
 
   const finishSends: ((ok: boolean) => void)[] = [];
@@ -205,7 +241,10 @@ const fakes = () => {
     printed,
     sources,
     waiting,
+    itsWay,
     finishUpload: (ok: boolean) => finishUpload?.(ok),
+    finishUploadOf: (path: string, ok: boolean) =>
+      finishUploads.get(path)?.(ok),
     temporaries,
     // Answers every temporary copy still going up.
     finishTemporary: (ok: boolean) => {
@@ -215,6 +254,14 @@ const fakes = () => {
     // A transfer of the same file to the same place that ended done earlier.
     landEarlier: (moved: TransferMoved) => {
       landed.push(keyOf(moved));
+    },
+    // Ends a transfer on the server and loses its settled frame, so only a
+    // fresh read of the running transfers sees it gone.
+    loseSettled: (transferId: string) => {
+      ended.add(transferId);
+    },
+    get reads() {
+      return reads;
     },
     // Ends a transfer the server was still running, as its settled frame does.
     endTransfer: (transferId: string, state: string) => {
@@ -231,6 +278,11 @@ const fakes = () => {
     finishSend: (ok: boolean, fault?: DataFault) => {
       error = ok ? undefined : fault;
       for (const finish of finishSends.splice(0)) finish(ok);
+    },
+    // Answers the oldest send still waiting, and no other.
+    finishOldestSend: (ok: boolean) => {
+      error = undefined;
+      finishSends.shift()?.(ok);
     },
   };
 };
@@ -307,6 +359,30 @@ describe('Sends', () => {
     expect(sends.active).toBe(false);
   });
 
+  it('says where the file lands once it is on its way, not when it has landed', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const paths: string[] = [];
+
+    const done = sends.send(file, 'p1', 'Printer 1', 'local', 'usb', {
+      keep: '',
+      onItsWay: (path) => {
+        paths.push(path);
+      },
+    });
+    f.finishUpload(true);
+    await tick();
+
+    // The store of running transfers runs it from the stream, with the name
+    // the server chose when the person kept both files.
+    expect(f.itsWay.map((one) => one.source)).toEqual(['cube.bgcode']);
+    f.itsWay[0]?.run('usb/cube[1].bgcode');
+    expect(paths).toEqual(['usb/cube[1].bgcode']);
+
+    f.finishSend(true);
+    await done;
+  });
+
   it('prints a kept file once it is uploaded, and only sending never prints', async () => {
     const f = fakes();
     const sends = sendsOf(f);
@@ -367,7 +443,7 @@ describe('Sends', () => {
     f.endTransfer('t1', 'failed');
     flushSync();
 
-    expect(sends.rows[0]?.step).toBe('sending');
+    expect(sends.rows[0]?.step).toBe('checking');
     expect(sends.rows[0]?.progress).toBeNull();
   });
 
@@ -542,6 +618,429 @@ describe('Sends', () => {
     expect(sends.rows).toEqual([]);
   });
 
+  it('sends files dropped together to one printer one after another, and every one lands', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+
+    const outcomes = ['a.bgcode', 'b.bgcode', 'c.bgcode'].map((name) =>
+      sends.send(named(name), 'p1', 'Printer 1', 'local', 'usb'),
+    );
+    // A temporary copy goes up only once its turn has come: the server
+    // deletes one nobody has sent for an hour, and a long line outlasts that.
+    expect(f.temporaries.map((one) => one.name)).toEqual(['a.bgcode']);
+    expect(sends.rows.map((row) => row.step)).toEqual([
+      'waiting',
+      'waiting',
+      'uploading',
+    ]);
+    expect(sends.rows[0]?.progress).toBeNull();
+    expect(sends.rows[0]?.canCancel).toBe(true);
+    // Closing the tab would lose the files still waiting.
+    expect(sends.uploading).toBe(true);
+
+    f.finishTemporary(true);
+    await tick();
+    // The printer fetches one file at a time, so the others wait their turn.
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+
+    f.finishOldestSend(true);
+    await tick();
+    expect(f.temporaries.map((one) => one.name)).toEqual([
+      'a.bgcode',
+      'b.bgcode',
+    ]);
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+
+    f.finishOldestSend(true);
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    f.finishOldestSend(true);
+
+    expect(await Promise.all(outcomes)).toEqual(['done', 'done', 'done']);
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode', 'usb/c.bgcode']);
+    expect(sends.rows).toEqual([]);
+  });
+
+  it('a kept file goes up at once and waits on this server for its turn', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    const first = sends.send(file, 'p1', 'Printer 1', 'local', 'usb', {
+      keep: '',
+    });
+    f.finishUpload(true);
+    await tick();
+    const second = sends.send(
+      new File(['1234567'], 'b.bgcode', { lastModified: 1 }),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      { keep: '' },
+    );
+    expect(sends.rows[0]?.step).toBe('uploading');
+    f.finishUpload(true);
+    await tick();
+    expect(sends.rows[0]?.step).toBe('waiting');
+    expect(f.sent).toEqual(['usb/cube.bgcode']);
+
+    f.finishOldestSend(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/cube.bgcode', 'usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    expect(await second).toBe('done');
+  });
+
+  it('sends kept files in the order they were asked for, not in the order their uploads end', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) =>
+      new File(['1234567'], name, { lastModified: 1 });
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      {
+        keep: '',
+        print: true,
+      },
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      {
+        keep: '',
+      },
+    );
+    f.finishUploadOf('b.bgcode', true);
+    await tick();
+    expect(f.sent).toEqual([]);
+    expect(sends.rows.map((row) => row.step)).toEqual(['waiting', 'uploading']);
+
+    f.finishUploadOf('a.bgcode', true);
+    await tick();
+    expect(f.printed).toEqual(['usb/a.bgcode']);
+    f.finishOldestSend(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    expect(await second).toBe('done');
+  });
+
+  it('a kept file whose upload fails while the one before is still sending hands its turn on', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) =>
+      new File(['1234567'], name, { lastModified: 1 });
+    const keep = { keep: '' };
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const third = sends.send(
+      named('c.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    f.finishUploadOf('a.bgcode', true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+
+    f.finishUploadOf('b.bgcode', false);
+    expect(await second).toBe('failed');
+    f.finishUploadOf('c.bgcode', true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/c.bgcode']);
+    f.finishOldestSend(true);
+    expect(await third).toBe('done');
+  });
+
+  it('a kept file cancelled while it waits for the printer hands its turn on', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) =>
+      new File(['1234567'], name, { lastModified: 1 });
+    const keep = { keep: '' };
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const third = sends.send(
+      named('c.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    for (const name of ['a.bgcode', 'b.bgcode', 'c.bgcode']) {
+      f.finishUploadOf(name, true);
+    }
+    await tick();
+    const waiting = sends.rows.find((row) => row.name === 'b.bgcode');
+    expect(waiting?.step).toBe('waiting');
+
+    sends.cancel(waiting!.id);
+    expect(await second).toBe('cancelled');
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/c.bgcode']);
+    f.finishOldestSend(true);
+    expect(await third).toBe('done');
+  });
+
+  it('a kept file cancelled while it still goes up hands its turn on', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) =>
+      new File(['1234567'], name, { lastModified: 1 });
+    const keep = { keep: '' };
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    const third = sends.send(
+      named('c.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      keep,
+    );
+    f.finishUploadOf('a.bgcode', true);
+    f.finishUploadOf('c.bgcode', true);
+    await tick();
+
+    const uploading = sends.rows.find((row) => row.name === 'b.bgcode');
+    expect(uploading?.step).toBe('uploading');
+    sends.cancel(uploading!.id);
+    expect(await second).toBe('cancelled');
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/c.bgcode']);
+    f.finishOldestSend(true);
+    expect(await third).toBe('done');
+  });
+
+  it('a kept file whose upload fails hands its turn on', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) =>
+      new File(['1234567'], name, { lastModified: 1 });
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      {
+        keep: '',
+      },
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      {
+        keep: '',
+      },
+    );
+    f.finishUploadOf('a.bgcode', false);
+    expect(await first).toBe('failed');
+    f.finishUploadOf('b.bgcode', true);
+    await tick();
+    expect(f.sent).toEqual(['usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await second).toBe('done');
+  });
+
+  it('a file waiting for the printer can be cancelled, and the next one goes in its place', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    const third = sends.send(
+      named('c.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.finishTemporary(true);
+    await tick();
+
+    sends.cancel(sends.rows[1]!.id);
+    expect(await second).toBe('cancelled');
+    expect(sends.rows.map((row) => row.name)).toEqual(['c.bgcode', 'a.bgcode']);
+
+    f.finishOldestSend(true);
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    expect(f.temporaries.map((one) => one.name)).toEqual([
+      'a.bgcode',
+      'c.bgcode',
+    ]);
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/c.bgcode']);
+
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    expect(await third).toBe('done');
+  });
+
+  it('a reset ends the files still waiting, and none of them is sent', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    const waiting = ['b.bgcode', 'c.bgcode'].map((name) =>
+      sends.send(named(name), 'p1', 'Printer 1', 'local', 'usb'),
+    );
+    f.finishTemporary(true);
+    await tick();
+
+    sends.reset();
+    expect(await Promise.all(waiting)).toEqual(['cancelled', 'cancelled']);
+    f.finishOldestSend(true);
+    expect(await first).toBe('cancelled');
+    await tick();
+
+    expect(f.temporaries.map((one) => one.name)).toEqual(['a.bgcode']);
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+    expect(sends.rows).toEqual([]);
+  });
+
+  it('files for two printers do not wait for each other', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+
+    void sends.send(named('a.bgcode'), 'p1', 'Printer 1', 'local', 'usb');
+    void sends.send(named('b.bgcode'), 'p2', 'Printer 2', 'local', 'usb');
+    f.finishTemporary(true);
+    await tick();
+
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+  });
+
+  it('the next file goes once the one before failed', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+
+    const first = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    const second = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.finishTemporary(true);
+    await tick();
+
+    f.finishOldestSend(false);
+    expect(await first).toBe('failed');
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+
+    f.finishOldestSend(true);
+    expect(await second).toBe('done');
+  });
+
   it('a refused send ends failed', async () => {
     const f = fakes();
     const sends = sendsOf(f);
@@ -557,6 +1056,46 @@ describe('Sends', () => {
 
     expect(await done).toBe('failed');
     expect(sends.rows).toEqual([]);
+  });
+
+  it('a send refused before any transfer takes back who waited for it', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    const done = sends.send(file, 'p1', 'Printer 1', 'local', 'usb', {
+      keep: '',
+      onItsWay: () => undefined,
+    });
+    f.finishUpload(true);
+    await tick();
+    expect(f.itsWay).toHaveLength(1);
+    f.rows.shift();
+    f.finishSend(false, fault('connector/TRANSFER_BUSY'));
+
+    expect(await done).toBe('failed');
+    expect(f.itsWay).toEqual([]);
+  });
+
+  it('a send that asks about a taken name keeps who waits for it', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    const done = sends.send(file, 'p1', 'Printer 1', 'local', 'usb', {
+      keep: '',
+      onItsWay: () => undefined,
+    });
+    f.finishUpload(true);
+    await tick();
+    f.rows.shift();
+    f.waiting.push({
+      storage: 'local',
+      source: 'cube.bgcode',
+      path: 'usb/cube.bgcode',
+    });
+    f.finishSend(false, fault('core.printer/FILE_NAME_TAKEN'));
+
+    expect(await done).toBe('taken');
+    expect(f.itsWay).toHaveLength(1);
   });
 
   it('reports no progress while the printer has not said how long the file is', async () => {
@@ -581,7 +1120,7 @@ describe('Sends', () => {
     await tick();
     f.rows.shift();
 
-    expect(sends.rows[0]?.step).toBe('sending');
+    expect(sends.rows[0]?.step).toBe('checking');
     expect(sends.rows[0]?.progress).toBeNull();
     expect(sends.rows[0]?.canCancel).toBe(false);
   });
@@ -630,6 +1169,7 @@ describe('Sends', () => {
         deviceId: 'p9',
         printerName: 'XL',
         name: 'bracket.bgcode',
+        path: 'usb/bracket.bgcode',
         step: 'sending',
         progress: 0.5,
         mine: false,
@@ -707,6 +1247,22 @@ describe('Sends', () => {
     ]);
   });
 
+  // The server asks the printer about the name before it opens a transfer,
+  // which takes a printer seconds.
+  it('says the printer is being checked until the transfer is listed', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    void sends.send(file, 'p1', 'Printer 1', 'local', 'usb', { keep: '' });
+    f.finishUpload(true);
+    await tick();
+    const opened = f.rows.shift();
+    expect(sends.rows.map((row) => row.step)).toEqual(['checking']);
+
+    if (opened !== undefined) f.rows.push(opened);
+    expect(sends.rows.map((row) => row.step)).toEqual(['sending']);
+  });
+
   it('a name the printer holds ends taken', async () => {
     const f = fakes();
     const sends = sendsOf(f);
@@ -727,7 +1283,8 @@ describe('Sends', () => {
     f.finishSend(false);
 
     expect(await done).toBe('taken');
-    expect(sends.rows).toEqual([]);
+    // Drawn until the person answers.
+    expect(sends.rows.map((row) => row.step)).toEqual(['asking']);
   });
 
   it('a reset forgets the files this tab is sending', () => {
@@ -882,5 +1439,515 @@ describe('Sends, kept or not', () => {
 
     f.finishSend(true);
     expect(await done).toBe('done');
+  });
+});
+
+describe('Sends and a transfer from elsewhere', () => {
+  it('waits for a transfer another tab runs to the same printer', async () => {
+    const f = fakes();
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+    const sends = sendsOf(f);
+
+    const sent = sends.send(
+      new File(['1234567'], 'a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    expect(sends.rows.find((row) => row.name === 'a.bgcode')?.step).toBe(
+      'waiting',
+    );
+    await tick();
+    expect(f.temporaries).toEqual([]);
+
+    f.rows.splice(0, 1);
+    flushSync();
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+    f.finishOldestSend(true);
+    expect(await sent).toBe('done');
+  });
+
+  it('does not wait for a transfer to another printer', async () => {
+    const f = fakes();
+    f.rows.push(elsewhere({ transferId: 't-other', deviceId: 'p9' }));
+    const sends = sendsOf(f);
+
+    void sends.send(
+      new File(['1234567'], 'a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.finishTemporary(true);
+    await tick();
+
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+  });
+
+  it('waits for a transfer somebody started while the file went up', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    const sent = sends.send(
+      new File(['1234567'], 'a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual([]);
+    expect(sends.rows.find((row) => row.name === 'a.bgcode')?.step).toBe(
+      'waiting',
+    );
+
+    f.endTransfer('t-tab', 'done');
+    flushSync();
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+    f.finishOldestSend(true);
+    expect(await sent).toBe('done');
+  });
+
+  it('a file waiting for a transfer started during its upload can be cancelled', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+
+    const sent = sends.send(
+      new File(['1234567'], 'a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+    f.finishTemporary(true);
+    await tick();
+    const row = sends.rows.find((one) => one.name === 'a.bgcode');
+    sends.cancel(row!.id);
+
+    expect(await sent).toBe('cancelled');
+    expect(f.sent).toEqual([]);
+  });
+
+  // A settled frame lost without a continuity event leaves the transfer among
+  // the running ones, and the line must not wait for it for good.
+  it('reads the running transfers again while a file waits, so a lost settled frame does not hold the line', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const f = fakes();
+      f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+      const sends = sendsOf(f);
+      const sent = sends.send(
+        new File(['1234567'], 'a.bgcode'),
+        'p1',
+        'Printer 1',
+        'local',
+        'usb',
+      );
+      f.loseSettled('t-tab');
+      await tick();
+      expect(f.temporaries).toEqual([]);
+
+      vi.advanceTimersByTime(29_000);
+      expect(f.reads).toBe(0);
+      vi.advanceTimersByTime(1_000);
+      expect(f.reads).toBe(1);
+      flushSync();
+      await tick();
+      f.finishTemporary(true);
+      await tick();
+      expect(f.sent).toEqual(['usb/a.bgcode']);
+
+      // Nothing is read again once the printer is free.
+      vi.advanceTimersByTime(60_000);
+      expect(f.reads).toBe(1);
+      f.finishOldestSend(true);
+      expect(await sent).toBe('done');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a file waiting for a transfer from elsewhere can be cancelled', async () => {
+    const f = fakes();
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+    const sends = sendsOf(f);
+
+    const sent = sends.send(
+      new File(['1234567'], 'a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    const row = sends.rows.find((one) => one.name === 'a.bgcode');
+    sends.cancel(row!.id);
+
+    expect(await sent).toBe('cancelled');
+    expect(f.temporaries).toEqual([]);
+  });
+});
+
+describe('Sends and a name the printer holds', () => {
+  // Drops a print of a.bgcode and a copy of b.bgcode, and lets a.bgcode end
+  // on a name the printer holds, as the server answers it.
+  const dropWithTakenPrint = async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+    const printed = sends.send(
+      named('a.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+      {
+        print: true,
+      },
+    );
+    const copied = sends.send(
+      named('b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.finishTemporary(true);
+    await tick();
+    f.rows.shift();
+    f.waiting.push({
+      storage: 'local',
+      source: f.sources[0]!,
+      path: 'usb/a.bgcode',
+    });
+    f.finishOldestSend(false);
+    expect(await printed).toBe('taken');
+    await tick();
+
+    return { f, sends, copied };
+  };
+
+  it('holds the printer while the person is asked, so no copy goes ahead of the file to print', async () => {
+    const { f } = await dropWithTakenPrint();
+
+    expect(f.temporaries.map((one) => one.name)).toEqual(['a.bgcode']);
+    expect(f.sent).toEqual(['usb/a.bgcode']);
+  });
+
+  it('sends the replacing file in the place it held, before the copies', async () => {
+    const { f, sends, copied } = await dropWithTakenPrint();
+    const order: string[] = [];
+
+    f.waiting.shift();
+    const replaced = sends.inTurn('p1', () => {
+      order.push('replace');
+      return Promise.resolve();
+    });
+    await replaced;
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    order.push(...f.sent.slice(1));
+
+    expect(order).toEqual(['replace', 'usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await copied).toBe('done');
+  });
+
+  it('sends the replacing file only once a transfer started elsewhere has ended', async () => {
+    const { f, sends } = await dropWithTakenPrint();
+    const ran: string[] = [];
+    // Somebody else sends to the printer while the person is asked.
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+
+    f.waiting.shift();
+    let finish = (): void => undefined;
+    const replaced = sends.inTurn(
+      'p1',
+      () =>
+        new Promise<void>((resolve) => {
+          ran.push('replace');
+          finish = resolve;
+        }),
+    );
+    await tick();
+    expect(ran).toEqual([]);
+    const row = () => sends.rows.find((one) => one.name === 'a.bgcode');
+    // It waits like any file, and only then reads as deleting the printer's
+    // file to make room.
+    expect(row()?.step).toBe('waiting');
+    expect(row()?.canCancel).toBe(true);
+
+    f.endTransfer('t-tab', 'done');
+    flushSync();
+    await tick();
+    expect(row()?.step).toBe('replacing');
+    expect(ran).toEqual(['replace']);
+    finish();
+    await replaced;
+  });
+
+  it('leaves the printer’s file when the person cancels a replace still waiting, and lets the copies go', async () => {
+    const { f, sends, copied } = await dropWithTakenPrint();
+    const ran: string[] = [];
+    f.rows.push(elsewhere({ transferId: 't-tab', deviceId: 'p1' }));
+
+    f.waiting.shift();
+    const replaced = sends.inTurn('p1', () => {
+      ran.push('replace');
+      return Promise.resolve('replaced');
+    });
+    await tick();
+    const row = sends.rows.find((one) => one.name === 'a.bgcode');
+    sends.cancel(row!.id);
+
+    expect(await replaced).toBeUndefined();
+    expect(ran).toEqual([]);
+    expect(sends.rows.find((one) => one.name === 'a.bgcode')).toBeUndefined();
+
+    f.endTransfer('t-tab', 'done');
+    flushSync();
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await copied).toBe('done');
+  });
+
+  it('draws the file while the person is asked, and as replacing once it is replaced', async () => {
+    const { f, sends } = await dropWithTakenPrint();
+    const stepOf = (name: string) =>
+      sends.rows.find((row) => row.name === name)?.step;
+
+    expect(stepOf('a.bgcode')).toBe('asking');
+    // It keeps its place among the files of the drop, ahead of the copy.
+    expect(pendingSendsOf(sends.rows, 'p1', []).map((row) => row.name)).toEqual(
+      ['a.bgcode', 'b.bgcode'],
+    );
+    expect(sends.rows.find((row) => row.name === 'a.bgcode')?.canCancel).toBe(
+      false,
+    );
+
+    f.waiting.shift();
+    let finish = (): void => undefined;
+    const replaced = sends.inTurn(
+      'p1',
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await tick();
+    expect(stepOf('a.bgcode')).toBe('replacing');
+
+    finish();
+    await replaced;
+    expect(stepOf('a.bgcode')).toBeUndefined();
+  });
+
+  it('drops the file once the person keeps the one on the printer', async () => {
+    const { f, sends } = await dropWithTakenPrint();
+
+    f.waiting.shift();
+    flushSync();
+    await tick();
+
+    expect(sends.rows.find((row) => row.name === 'a.bgcode')).toBeUndefined();
+  });
+
+  // A kept file goes up beside the others and takes its turn afterwards, so
+  // its place was waited for and not given at once.
+  it('holds the printer for a kept file that waited for its turn', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+    const drop = (name: string) =>
+      sends.send(named(name), 'p1', 'Printer 1', 'local', 'usb', { keep: '' });
+    const first = drop('a.bgcode');
+    const second = drop('b.bgcode');
+    const third = drop('c.bgcode');
+    for (const name of ['a.bgcode', 'b.bgcode', 'c.bgcode']) {
+      f.finishUploadOf(name, true);
+    }
+    await tick();
+    f.finishOldestSend(true);
+    expect(await first).toBe('done');
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+
+    // The printer holds b.bgcode, and the person is asked.
+    f.rows.shift();
+    f.waiting.push({
+      storage: 'local',
+      source: 'b.bgcode',
+      path: 'usb/b.bgcode',
+    });
+    f.finishOldestSend(false);
+    expect(await second).toBe('taken');
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+
+    f.waiting.shift();
+    flushSync();
+    await tick();
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode', 'usb/c.bgcode']);
+    f.finishOldestSend(true);
+    expect(await third).toBe('done');
+  });
+
+  it('lets the copies go once the person keeps the file on the printer', async () => {
+    const { f, copied } = await dropWithTakenPrint();
+
+    f.waiting.shift();
+    flushSync();
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+
+    expect(f.sent).toEqual(['usb/a.bgcode', 'usb/b.bgcode']);
+    f.finishOldestSend(true);
+    expect(await copied).toBe('done');
+  });
+});
+
+describe('Sends.inTurn', () => {
+  it('runs a replace only once the file going to the printer has landed', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const ran: string[] = [];
+
+    const copy = sends.send(
+      new File(['1234567'], 'b.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/b.bgcode']);
+
+    const replaced = sends.inTurn('p1', () => {
+      ran.push('replace');
+      return Promise.resolve('replaced');
+    });
+    await tick();
+    expect(ran).toEqual([]);
+
+    f.finishOldestSend(true);
+    expect(await copy).toBe('done');
+    expect(await replaced).toBe('replaced');
+    expect(ran).toEqual(['replace']);
+  });
+
+  it('runs at once on a free printer, and holds the printer until it ends', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    let finish = (): void => undefined;
+
+    const replaced = sends.inTurn(
+      'p1',
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const next = sends.send(
+      new File(['1234567'], 'c.bgcode'),
+      'p1',
+      'Printer 1',
+      'local',
+      'usb',
+    );
+    await tick();
+    expect(f.temporaries).toEqual([]);
+
+    finish();
+    await replaced;
+    await tick();
+    f.finishTemporary(true);
+    await tick();
+    expect(f.sent).toEqual(['usb/c.bgcode']);
+    f.finishOldestSend(true);
+    expect(await next).toBe('done');
+  });
+});
+
+describe('pendingSendsOf', () => {
+  it('draws each file of a drop once, oldest first, from the drop until its transfer is listed', async () => {
+    const f = fakes();
+    const sends = sendsOf(f);
+    const named = (name: string) => new File(['1234567'], name);
+    const page = (moving: { path: string; state: string }[] = []) =>
+      pendingSendsOf(sends.rows, 'p1', moving).map(
+        (row) => `${row.name}:${row.step}`,
+      );
+
+    for (const name of ['a.bgcode', 'b.bgcode']) {
+      void sends.send(named(name), 'p1', 'Printer 1', 'local', 'usb');
+    }
+    void sends.send(named('x.bgcode'), 'p2', 'Printer 2', 'local', 'usb');
+    expect(page()).toEqual(['a.bgcode:uploading', 'b.bgcode:waiting']);
+
+    f.finishTemporary(true);
+    await tick();
+    // On its way to the printer, before the server lists the transfer.
+    expect(page()).toEqual(['a.bgcode:sending', 'b.bgcode:waiting']);
+    // The transfer is listed, so the page draws it there and not here.
+    expect(page([{ path: '/usb/a.bgcode', state: 'sending' }])).toEqual([
+      'b.bgcode:waiting',
+    ]);
+    // A transfer of the same name that ended before this send is not its own.
+    expect(page([{ path: 'usb/a.bgcode', state: 'done' }])).toEqual([
+      'a.bgcode:sending',
+      'b.bgcode:waiting',
+    ]);
+
+    f.finishOldestSend(true);
+    await tick();
+    // The transfer of the file before is still listed when this one goes.
+    expect(page([{ path: 'usb/a.bgcode', state: 'done' }])).toEqual([
+      'b.bgcode:uploading',
+    ]);
+  });
+
+  it('leaves out a file somebody else is sending', () => {
+    const f = fakes();
+    f.rows.push(elsewhere({ deviceId: 'p1' }));
+    const sends = sendsOf(f);
+
+    expect(pendingSendsOf(sends.rows, 'p1', [])).toEqual([]);
+  });
+});
+
+describe('printFirst', () => {
+  it('sends the file picked to print first and prints only that one', () => {
+    expect(printFirst(['a', 'b', 'c'], 2)).toEqual([
+      { file: 'c', print: true },
+      { file: 'a', print: false },
+      { file: 'b', print: false },
+    ]);
+  });
+
+  it('copies every file in its order when none is printed', () => {
+    expect(printFirst(['a', 'b'], undefined)).toEqual([
+      { file: 'a', print: false },
+      { file: 'b', print: false },
+    ]);
+  });
+
+  it('prints one of two files of the same name', () => {
+    expect(
+      printFirst(['part', 'part'], 1).filter((one) => one.print),
+    ).toHaveLength(1);
   });
 });

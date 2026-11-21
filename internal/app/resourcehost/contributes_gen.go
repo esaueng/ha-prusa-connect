@@ -12,18 +12,20 @@ import (
 // contract a client generator reads.
 func contributesOf(declared manifest.Contributes) httpapi.ResourceContributes {
 	return httpapi.ResourceContributes{
-		Pages:         pagesOf(declared.Pages),
-		Settings:      sectionsOf(declared.Sections[manifest.SlotSettings]),
-		DeviceCard:    sectionsOf(declared.Sections[manifest.SlotDeviceCard]),
-		DeviceSection: sectionsOf(declared.Sections[manifest.SlotDeviceSection]),
-		DeviceTab:     sectionsOf(declared.Sections[manifest.SlotDeviceTab]),
-		Cards:         cardsOf(declared.Cards),
-		DeviceAction:  actionsOf(declared.Actions[manifest.SlotDeviceAction]),
-		FileAction:    actionsOf(declared.Actions[manifest.SlotFileAction]),
-		PrintSection:  sectionsOf(declared.Sections[manifest.SlotPrintSection]),
-		FileView:      sectionsOf(declared.Sections[manifest.SlotFileView]),
-		FileTab:       sectionsOf(declared.Sections[manifest.SlotFileTab]),
-		CameraSection: sectionsOf(declared.Sections[manifest.SlotCameraSection]),
-		CameraView:    sectionsOf(declared.Sections[manifest.SlotCameraView]),
+		Pages:              pagesOf(declared.Pages),
+		Settings:           sectionsOf(declared.Sections[manifest.SlotSettings]),
+		DeviceCard:         sectionsOf(declared.Sections[manifest.SlotDeviceCard]),
+		DeviceSection:      sectionsOf(declared.Sections[manifest.SlotDeviceSection]),
+		DeviceTab:          sectionsOf(declared.Sections[manifest.SlotDeviceTab]),
+		Cards:              cardsOf(declared.Cards),
+		DeviceAction:       actionsOf(declared.Actions[manifest.SlotDeviceAction]),
+		FileAction:         actionsOf(declared.Actions[manifest.SlotFileAction]),
+		PrintSection:       sectionsOf(declared.Sections[manifest.SlotPrintSection]),
+		FileView:           sectionsOf(declared.Sections[manifest.SlotFileView]),
+		FileTab:            sectionsOf(declared.Sections[manifest.SlotFileTab]),
+		CameraSection:      sectionsOf(declared.Sections[manifest.SlotCameraSection]),
+		CameraView:         sectionsOf(declared.Sections[manifest.SlotCameraView]),
+		DeviceFileAction:   actionsOf(declared.Actions[manifest.SlotDeviceFileAction]),
+		DeviceUploadAction: actionsOf(declared.Actions[manifest.SlotDeviceUploadAction]),
 	}
 }

@@ -38,6 +38,9 @@ type DevicePrint struct {
 	Source  string `json:"source,omitempty"  doc:"The file's path inside that storage, relative to its root. Required with storage and refused without it. A temporary copy is deleted as it is for a send."                                                                                                      maxLength:"1024"`
 	Path    string `json:"path"              doc:"The file on the printer, storage-prefixed and relative, such as usb/bracket.bgcode. With a storage it is where the file lands; without one it is the file that is printed."                                                                                     maxLength:"1024"`
 	Replace bool   `json:"replace,omitempty" doc:"With a storage, delete the file the printer holds at path before sending this one. Without it any file there other than this server's unchanged copy of the same stored file is refused with core.printer/FILE_NAME_TAKEN, so a page can ask the person first."`
+	// KeepBoth sits after Replace in DeviceUpload too, so one converts to the
+	// other.
+	KeepBoth bool `json:"keep_both,omitempty" doc:"With a storage, send under a free name when the printer holds another file at path, such as usb/part[1].bgcode, keep the printer's file and print the one sent. The answer's path names the file that was started. Refused together with replace."`
 }
 
 type printFileInput struct {
@@ -149,6 +152,26 @@ func ValidatePrint(body DevicePrint) error {
 	if body.Storage == "" && body.Replace {
 		return httpfault.RequestInvalid("body.replace", "a file to send in place of the printer's",
 			"replace sends a file from a storage, so name the storage and the source too")
+	}
+
+	if body.Storage == "" && body.KeepBoth {
+		return httpfault.RequestInvalid("body.keep_both", "a file to send beside the printer's",
+			"keep_both sends a file from a storage, so name the storage and the source too")
+	}
+
+	return validKeepBoth(body.Replace, body.KeepBoth)
+}
+
+// ValidateUpload holds one send to the rules its fields carry together.
+func ValidateUpload(body DeviceUpload) error {
+	return validKeepBoth(body.Replace, body.KeepBoth)
+}
+
+// validKeepBoth refuses asking for both answers to a name the printer holds.
+func validKeepBoth(replace, keepBoth bool) error {
+	if replace && keepBoth {
+		return httpfault.RequestInvalid("body.keep_both", "one answer to a name the printer holds",
+			"replace deletes the printer's file and keep_both keeps it, so send one of the two")
 	}
 
 	return nil

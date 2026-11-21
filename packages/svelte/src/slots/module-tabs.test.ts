@@ -14,8 +14,16 @@ describe('module tabs', () => {
     });
 
     expect(moduleTabs(registry, 'device-tab')).toEqual([
-      { id: 'com.github.aux.acme.nozzle-watch.nozzle', label: 'Nozzle' },
-      { id: 'com.example.other.nozzle', label: 'Other nozzle' },
+      {
+        id: 'com.github.aux.acme.nozzle-watch.nozzle',
+        label: 'Nozzle',
+        isolated: false,
+      },
+      {
+        id: 'com.example.other.nozzle',
+        label: 'Other nozzle',
+        isolated: false,
+      },
     ]);
   });
 
@@ -34,7 +42,7 @@ describe('module tabs', () => {
       moduleTabs(registry, slot, fileRef);
 
     expect(tabsOf('file-tab', 'local:a.gcode')).toEqual([
-      { id: 'com.example.view.gcode', label: 'G-code' },
+      { id: 'com.example.view.gcode', label: 'G-code', isolated: false },
     ]);
     // A file reference is no device record, so a tab with a devices selector
     // is not kept.
@@ -47,21 +55,46 @@ describe('module tabs', () => {
     );
   });
 
-  // ADR-20261110-5np.
-  describe('a device tab with a devices selector', () => {
+  it('says which tab asks for a cross-origin isolated page', () => {
     const registry = new SlotRegistry();
-    registry.declare('com.prusa3d.display', {
+    registry.declare('com.example.console', {
       device_tab: [
-        { id: 'display', title: 'Display', devices: { resident: true } },
+        { id: 'console', title: 'Device page', cross_origin_isolated: true },
         { id: 'log', title: 'Log' },
       ],
     });
-    const display = { id: 'com.prusa3d.display.display', label: 'Display' };
-    const log = { id: 'com.prusa3d.display.log', label: 'Log' };
+
+    expect(
+      moduleTabs(registry, 'device-tab').map((tab) => [tab.id, tab.isolated]),
+    ).toEqual([
+      ['com.example.console.console', true],
+      ['com.example.console.log', false],
+    ]);
+  });
+
+  // ADR-20261110-5np.
+  describe('a device tab with a devices selector', () => {
+    const registry = new SlotRegistry();
+    registry.declare('com.example.console', {
+      device_tab: [
+        { id: 'console', title: 'Device page', devices: { resident: true } },
+        { id: 'log', title: 'Log' },
+      ],
+    });
+    const devicePage = {
+      id: 'com.example.console.console',
+      label: 'Device page',
+      isolated: false,
+    };
+    const log = {
+      id: 'com.example.console.log',
+      label: 'Log',
+      isolated: false,
+    };
 
     it('is a tab of the printer the server runs on', () => {
       expect(moduleTabs(registry, 'device-tab', { resident: true })).toEqual([
-        display,
+        devicePage,
         log,
       ]);
     });

@@ -1,0 +1,2533 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "simple-queue",
+    "version": "0.1.0",
+    "description": "The routes the simple-queue module serves. Every path is relative to the mount the host assigns, and the host serves this document rebased under it at <mount>/openapi.json."
+  },
+  "security": [
+    {
+      "bearer": []
+    },
+    {
+      "session": []
+    }
+  ],
+  "paths": {
+    "/queues/summary": {
+      "get": {
+        "operationId": "read-summary",
+        "summary": "Every printer's queue in short",
+        "description": "One line for each printer the caller may see, in the server's order: the printer's state, how many files wait, the next one, and the file on its way or printing. A printer nobody queued a file for has a line too, with nothing waiting. The host takes view_resource on the module's instance before this is called, which a credential with the read scope reaches.",
+        "responses": {
+          "200": {
+            "description": "The queues.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "read",
+        "x-codes": [
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/queues": {
+      "get": {
+        "operationId": "read-board",
+        "summary": "Every printer's queue, whole",
+        "description": "The queue of each printer the caller may see, in the server's order, each as one printer's queue answers it: the files in the order they print, the ended prints, the printer's state, and whether the caller may change the queue. A page that lists the files of many printers reads them all in one request. A printer nobody queued a file for answers an empty queue. The host takes view_resource on the module's instance before this is called, which a credential with the read scope reaches.",
+        "responses": {
+          "200": {
+            "description": "The queues.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "read",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}": {
+      "get": {
+        "operationId": "read-queue",
+        "summary": "One printer's queue",
+        "description": "The files of one printer's queue in the order they print, the ended prints, the printer's state, and whether the caller may change the queue. A printer with no queue answers an empty one. The host takes view_resource on the module's instance before this is called, which a credential with the read scope reaches. The module then asks the server whether the caller may see the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "read",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/entries": {
+      "post": {
+        "operationId": "add-entry",
+        "summary": "Put a file on the queue",
+        "description": "Puts a print file at the end of the queue, or at the position the body names. The file is in one of this server's storages, which takes read_storage, or already on the printer when the body names no storage. It must be a print file. When the printer is ready and prints nothing from the queue, the file starts at once, as the caller. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The queue with the new file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/INVALID": {
+                    "summary": "the module did not accept what was sent",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 400,
+                      "code": "simple-queue/INVALID",
+                      "title": "the module did not accept what was sent",
+                      "detail": "the module did not accept what was sent",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/FILE_DENIED": {
+                    "summary": "you may not read that storage",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/FILE_DENIED",
+                      "title": "you may not read that storage",
+                      "detail": "you may not read that storage",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NOT_A_PERSON": {
+                    "summary": "only a person may add to a queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_A_PERSON",
+                      "title": "only a person may add to a queue",
+                      "detail": "only a person may add to a queue",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/FILE_NOT_FOUND": {
+                    "summary": "there is no such file",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/FILE_NOT_FOUND",
+                      "title": "there is no such file",
+                      "detail": "there is no such file",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/QUEUE_FULL": {
+                    "summary": "the queue of this printer is full",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/QUEUE_FULL",
+                      "title": "the queue of this printer is full",
+                      "detail": "the queue of this printer is full",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/BODY_TOO_LARGE": {
+                    "summary": "the request body is larger than this module reads",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 413,
+                      "code": "simple-queue/BODY_TOO_LARGE",
+                      "title": "the request body is larger than this module reads",
+                      "detail": "the request body is larger than this module reads",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_PRINTABLE": {
+                    "summary": "the file is not a print file",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 415,
+                      "code": "simple-queue/NOT_PRINTABLE",
+                      "title": "the file is not a print file",
+                      "detail": "the file is not a print file",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/BODY_TOO_LARGE",
+          "simple-queue/FILE_DENIED",
+          "simple-queue/FILE_NOT_FOUND",
+          "simple-queue/INVALID",
+          "simple-queue/NOT_A_PERSON",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_PRINTABLE",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/QUEUE_FULL",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/entries/{entry}": {
+      "delete": {
+        "operationId": "remove-entry",
+        "summary": "Take a file off the queue",
+        "description": "Takes a waiting file off the queue, or an ended print out of the history. A file on its way to the printer or printing is refused: stop the print on the printer. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entry",
+            "in": "path",
+            "required": true,
+            "description": "The entry's id, as the queue answered it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ENTRY_NOT_FOUND": {
+                    "summary": "the queue holds no such entry",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/ENTRY_NOT_FOUND",
+                      "title": "the queue holds no such entry",
+                      "detail": "the queue holds no such entry",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ENTRY_ACTIVE": {
+                    "summary": "the entry is on its way to the printer or printing",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/ENTRY_ACTIVE",
+                      "title": "the entry is on its way to the printer or printing",
+                      "detail": "the entry is on its way to the printer or printing",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/ENTRY_ACTIVE",
+          "simple-queue/ENTRY_NOT_FOUND",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/entries/{entry}/move": {
+      "post": {
+        "operationId": "move-entry",
+        "summary": "Move a file in the queue",
+        "description": "Puts a waiting file at a new position among the waiting files. Position 0 is the next one to print, and a position past the end is the end. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entry",
+            "in": "path",
+            "required": true,
+            "description": "The entry's id, as the queue answered it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/INVALID": {
+                    "summary": "the module did not accept what was sent",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 400,
+                      "code": "simple-queue/INVALID",
+                      "title": "the module did not accept what was sent",
+                      "detail": "the module did not accept what was sent",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ENTRY_NOT_FOUND": {
+                    "summary": "the queue holds no such entry",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/ENTRY_NOT_FOUND",
+                      "title": "the queue holds no such entry",
+                      "detail": "the queue holds no such entry",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ENTRY_ACTIVE": {
+                    "summary": "the entry is on its way to the printer or printing",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/ENTRY_ACTIVE",
+                      "title": "the entry is on its way to the printer or printing",
+                      "detail": "the entry is on its way to the printer or printing",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/BODY_TOO_LARGE": {
+                    "summary": "the request body is larger than this module reads",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 413,
+                      "code": "simple-queue/BODY_TOO_LARGE",
+                      "title": "the request body is larger than this module reads",
+                      "detail": "the request body is larger than this module reads",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/BODY_TOO_LARGE",
+          "simple-queue/ENTRY_ACTIVE",
+          "simple-queue/ENTRY_NOT_FOUND",
+          "simple-queue/INVALID",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/start": {
+      "post": {
+        "operationId": "start-next",
+        "summary": "Print the next file now",
+        "description": "Sends the next waiting file to the printer and starts it, as the caller. Use it when the bed is clear. The printer must be free: idle, ready, or showing a finished or stopped print. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NO_STORAGE": {
+                    "summary": "the printer has no storage the file can be written to",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/NO_STORAGE",
+                      "title": "the printer has no storage the file can be written to",
+                      "detail": "the printer has no storage the file can be written to",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/PRINTER_BUSY": {
+                    "summary": "the printer already has a print from the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/PRINTER_BUSY",
+                      "title": "the printer already has a print from the queue",
+                      "detail": "the printer already has a print from the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_NOT_FREE": {
+                    "summary": "the printer cannot start a print now",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/PRINTER_NOT_FREE",
+                      "title": "the printer cannot start a print now",
+                      "detail": "the printer cannot start a print now",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/QUEUE_EMPTY": {
+                    "summary": "nothing is waiting in the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/QUEUE_EMPTY",
+                      "title": "nothing is waiting in the queue",
+                      "detail": "nothing is waiting in the queue",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/SEND_FAILED": {
+                    "summary": "the printer did not start the print",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 502,
+                      "code": "simple-queue/SEND_FAILED",
+                      "title": "the printer did not start the print",
+                      "detail": "the printer did not start the print",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/NO_STORAGE",
+          "simple-queue/PRINTER_BUSY",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_NOT_FREE",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/QUEUE_EMPTY",
+          "simple-queue/SEND_FAILED",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/ready": {
+      "post": {
+        "operationId": "set-ready",
+        "summary": "Mark the printer as ready, or not",
+        "description": "Tells the printer its bed is clear and it may take the next print, or takes that back. While the printer is ready, the queue starts the next file by itself, if the module may print on the printer. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadyBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/INVALID": {
+                    "summary": "the module did not accept what was sent",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 400,
+                      "code": "simple-queue/INVALID",
+                      "title": "the module did not accept what was sent",
+                      "detail": "the module did not accept what was sent",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/READY_UNSUPPORTED": {
+                    "summary": "this printer cannot be marked as ready",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "simple-queue/READY_UNSUPPORTED",
+                      "title": "this printer cannot be marked as ready",
+                      "detail": "this printer cannot be marked as ready",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content Too Large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/BODY_TOO_LARGE": {
+                    "summary": "the request body is larger than this module reads",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 413,
+                      "code": "simple-queue/BODY_TOO_LARGE",
+                      "title": "the request body is larger than this module reads",
+                      "detail": "the request body is larger than this module reads",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/SEND_FAILED": {
+                    "summary": "the printer did not start the print",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 502,
+                      "code": "simple-queue/SEND_FAILED",
+                      "title": "the printer did not start the print",
+                      "detail": "the printer did not start the print",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/BODY_TOO_LARGE",
+          "simple-queue/INVALID",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/READY_UNSUPPORTED",
+          "simple-queue/SEND_FAILED",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    },
+    "/printers/{device}/history": {
+      "get": {
+        "operationId": "read-history",
+        "summary": "One printer's ended prints",
+        "description": "The prints that ended on the printer's queue, newest first: finished, failed or cancelled, with who added and who started each. It keeps as many as keep_history in the settings. The host takes view_resource on the module's instance before this is called, which a credential with the read scope reaches.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The printer's ended prints.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "read",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      },
+      "delete": {
+        "operationId": "clear-history",
+        "summary": "Forget the ended prints",
+        "description": "Forgets every ended print of the printer's queue. The waiting files stay. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "description": "The printer's id, as the server names it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The printer's queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/NOT_OPERATOR": {
+                    "summary": "you may not print on this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NOT_OPERATOR",
+                      "title": "you may not print on this printer",
+                      "detail": "you may not print on this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "simple-queue/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "simple-queue/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/PRINTER_NOT_FOUND": {
+                    "summary": "there is no such printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "simple-queue/PRINTER_NOT_FOUND",
+                      "title": "there is no such printer",
+                      "detail": "there is no such printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/STORE_FAILED": {
+                    "summary": "the module could not save the queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 500,
+                      "code": "simple-queue/STORE_FAILED",
+                      "title": "the module could not save the queue",
+                      "detail": "the module could not save the queue",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "simple-queue/ACCESS_UNKNOWN": {
+                    "summary": "the server did not say what you may do",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/ACCESS_UNKNOWN",
+                      "title": "the server did not say what you may do",
+                      "detail": "the server did not say what you may do",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "simple-queue/PRINTER_UNKNOWN": {
+                    "summary": "the server did not answer about the printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "simple-queue/PRINTER_UNKNOWN",
+                      "title": "the server did not answer about the printer",
+                      "detail": "the server did not answer about the printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "simple-queue/ACCESS_UNKNOWN",
+          "simple-queue/NOT_OPERATOR",
+          "simple-queue/NOT_READY",
+          "simple-queue/NO_PRINCIPAL",
+          "simple-queue/PRINTER_NOT_FOUND",
+          "simple-queue/PRINTER_UNKNOWN",
+          "simple-queue/STORE_FAILED"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Printer": {
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "connected",
+          "can_be_ready",
+          "free",
+          "ready"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The printer's name."
+          },
+          "model": {
+            "type": "string",
+            "description": "The machine the printer says it is, such as MK4S, which a page draws its picture for. Absent for a printer that said nothing."
+          },
+          "state": {
+            "type": "string",
+            "description": "The printer's own word for what it is doing, such as IDLE, READY, PRINTING or FINISHED."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "False for a printer that is away."
+          },
+          "can_be_ready": {
+            "type": "boolean",
+            "description": "The printer takes the command that marks it as ready."
+          },
+          "free": {
+            "type": "boolean",
+            "description": "The printer takes a print now."
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "A person told the printer its bed is clear."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "The printer has a print paused: it takes the command that resumes one."
+          }
+        }
+      },
+      "Entry": {
+        "type": "object",
+        "required": [
+          "id",
+          "storage",
+          "path",
+          "name",
+          "added_by",
+          "added_at",
+          "state",
+          "changed_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "storage": {
+            "type": "string",
+            "description": "The storage the file is in, and empty for a file already on the printer."
+          },
+          "path": {
+            "type": "string",
+            "description": "The file inside that storage, or its path on the printer, such as usb/bracket.bgcode."
+          },
+          "name": {
+            "type": "string",
+            "description": "The file's name without its folders."
+          },
+          "added_by": {
+            "type": "string",
+            "description": "The principal of the person who put the file on the queue."
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "sending",
+              "printing",
+              "ended"
+            ]
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": "string",
+            "enum": [
+              "send_failed",
+              "transfer_failed",
+              "not_started",
+              "owner_may_not",
+              "owner_unknown",
+              "owner_unchecked",
+              "printer_not_free",
+              "no_storage",
+              "not_arrived",
+              "taken_back"
+            ],
+            "description": "Why a waiting file did not start. After send_failed, transfer_failed, not_started and taken_back the file waits for a person to start it. not_arrived is a file added while it was copied to the printer that is not there yet. taken_back is a file a person stopped on its way to the printer."
+          },
+          "detail": {
+            "type": "string",
+            "description": "The server's or the printer's own words for the note."
+          },
+          "started_by": {
+            "type": "string",
+            "description": "Who started the print, and empty for the queue itself."
+          },
+          "landing": {
+            "type": "string",
+            "description": "Where the file was written on the printer."
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "How often the file was sent."
+          },
+          "arriving": {
+            "type": "boolean",
+            "description": "True for a file on the printer that was added while it was copied there and that nothing has seen on the printer yet."
+          },
+          "estimated_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the slicer said the file prints, in whole seconds, read when the file was added. Absent for a file that does not say, and for one nobody could ask about."
+          },
+          "printer_model": {
+            "type": "string",
+            "description": "The printer the file was sliced for, such as XL2IS, read when the file was added. Absent for a file that does not say."
+          },
+          "layer_height_mm": {
+            "type": "number",
+            "format": "double",
+            "description": "The layer height the file was sliced with, in millimetres. Absent for a file that does not say."
+          },
+          "material": {
+            "type": "string",
+            "description": "The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Absent for a file that does not say."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The file's size in bytes, read when the file was added. Absent when nobody could ask."
+          },
+          "modified": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When a file on the printer was last written, in seconds since the Unix epoch. With the size it names the version of the file. Absent for a file in a storage, and when nobody could ask."
+          },
+          "transfer_id": {
+            "type": "string"
+          },
+          "command_id": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "The server's id of the print, once the printer opened it."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "finished",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Limits": {
+        "type": "object",
+        "required": [
+          "max_waiting",
+          "keep_history"
+        ],
+        "properties": {
+          "max_waiting": {
+            "type": "integer",
+            "description": "How many files may wait on one printer."
+          },
+          "keep_history": {
+            "type": "integer",
+            "description": "How many ended prints a queue keeps."
+          }
+        }
+      },
+      "Queue": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "entries",
+          "printer",
+          "starts_alone",
+          "may_change",
+          "limits"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "description": "The file on its way or printing first, if there is one, and then the waiting files in the order they print."
+          },
+          "printer": {
+            "$ref": "#/components/schemas/Printer"
+          },
+          "starts_alone": {
+            "type": "boolean",
+            "description": "The queue may start the next file by itself once the printer is ready. Without it a person starts each file. The answer with every queue says it only for a queue with a file waiting, and false for the others."
+          },
+          "may_change": {
+            "type": "boolean",
+            "description": "The caller may print on the printer, so may change its queue."
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "remaining_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the printer says the print from the queue still takes, in seconds. Absent when nothing from the queue prints, and when the printer does not say."
+          },
+          "progress": {
+            "type": "number",
+            "format": "double",
+            "description": "How far the printer says the print from the queue is, in whole percent. Absent when nothing from the queue prints, and when the printer does not say."
+          }
+        }
+      },
+      "Summary": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "printer",
+          "waiting"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "printer": {
+            "$ref": "#/components/schemas/Printer"
+          },
+          "waiting": {
+            "type": "integer",
+            "description": "How many files wait."
+          },
+          "active": {
+            "$ref": "#/components/schemas/Entry"
+          },
+          "next": {
+            "$ref": "#/components/schemas/Entry"
+          }
+        }
+      },
+      "Overview": {
+        "type": "object",
+        "required": [
+          "printers"
+        ],
+        "properties": {
+          "printers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Summary"
+            }
+          }
+        }
+      },
+      "Board": {
+        "type": "object",
+        "required": [
+          "queues"
+        ],
+        "properties": {
+          "queues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Queue"
+            }
+          }
+        }
+      },
+      "AddBody": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "The storage the file is in, by the name it is declared under. Leave it out for a file already on the printer."
+          },
+          "path": {
+            "type": "string",
+            "description": "The file inside that storage, or the file's path on the printer, such as usb/bracket.bgcode."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Where the file goes among the waiting files, 0 being the next one. Absent is the end."
+          },
+          "arriving": {
+            "type": "boolean",
+            "description": "The file is being copied to path on the printer right now, so it is added without looking for it there. It goes with no storage. The queue looks for the file when its turn comes, and an entry whose file is not there waits with the note not_arrived."
+          }
+        }
+      },
+      "MoveBody": {
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The new position among the waiting files, 0 being the next one."
+          }
+        }
+      },
+      "ReadyBody": {
+        "type": "object",
+        "required": [
+          "ready"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "type": "boolean",
+            "description": "True says the bed is clear. False takes that back."
+          }
+        }
+      },
+      "Refusal": {
+        "type": "object",
+        "required": [
+          "type",
+          "status",
+          "code",
+          "title",
+          "detail",
+          "params",
+          "retryable"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "simple-queue/ACCESS_UNKNOWN",
+              "simple-queue/BODY_TOO_LARGE",
+              "simple-queue/ENTRY_ACTIVE",
+              "simple-queue/ENTRY_NOT_FOUND",
+              "simple-queue/FILE_DENIED",
+              "simple-queue/FILE_NOT_FOUND",
+              "simple-queue/INVALID",
+              "simple-queue/NOT_A_PERSON",
+              "simple-queue/NOT_OPERATOR",
+              "simple-queue/NOT_PRINTABLE",
+              "simple-queue/NOT_READY",
+              "simple-queue/NO_PRINCIPAL",
+              "simple-queue/NO_STORAGE",
+              "simple-queue/PRINTER_BUSY",
+              "simple-queue/PRINTER_NOT_FOUND",
+              "simple-queue/PRINTER_NOT_FREE",
+              "simple-queue/PRINTER_UNKNOWN",
+              "simple-queue/QUEUE_EMPTY",
+              "simple-queue/QUEUE_FULL",
+              "simple-queue/READY_UNSUPPORTED",
+              "simple-queue/SEND_FAILED",
+              "simple-queue/STORE_FAILED"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "History": {
+        "type": "object",
+        "required": [
+          "history"
+        ],
+        "properties": {
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "description": "The ended prints, newest first."
+          }
+        }
+      }
+    }
+  }
+}

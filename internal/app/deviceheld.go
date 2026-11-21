@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,39 +29,89 @@ var errHeldSame = errors.New("the printer already holds this file")
 const machineFileExists = "FILE_EXISTS"
 
 // destination decides what happens to the file the printer holds where an
-// upload lands. It only asks: nothing is deleted here.
+// upload lands, and answers the path to delete before the send and the path
+// the file lands at. It only asks: nothing is deleted here.
 //
 // Nothing there, or a printer that does not answer, decides nothing, and the
 // transfer answers for itself. A file there is the one this upload would send
 // only when reuse is set and this process sent that very version there and the
-// printer's copy has not changed since; that is errHeldSame. Anything else is
-// refused with FILE_NAME_TAKEN unless the upload says replace, and then the
-// path to delete before the send is returned. A folder is never deleted to
-// make room.
+// printer's copy has not changed since; that is errHeldSame. An upload that
+// says keep_both lands at the first free name instead, as freeName finds it.
+// Anything else is refused with FILE_NAME_TAKEN unless the upload says
+// replace, and then the path to delete is the printer's file. A folder is
+// never deleted to make room.
 func (d *devices) destination(
 	ctx context.Context, entry *device, id string, upload httpapi.DeviceUpload,
 	content connectorapi.Content, reuse bool,
-) (string, error) {
+) (string, string, error) {
 	held, found := heldAt(ctx, entry, upload.Path)
 	if !found {
-		return "", nil
+		return "", upload.Path, nil
 	}
 
 	if reuse && !upload.Replace && !held.Folder && d.copies.holds(id, upload, identityOfContent(content), held) {
-		return "", errHeldSame
+		return "", upload.Path, errHeldSame
+	}
+
+	if upload.KeepBoth {
+		at, free := freeName(ctx, entry, upload.Path)
+		if !free {
+			return "", "", nameTaken(id, upload.Path, false)
+		}
+
+		return "", at, nil
 	}
 
 	if !upload.Replace || held.Folder {
-		return "", nameTaken(id, upload.Path)
+		return "", "", nameTaken(id, upload.Path, held.ReadOnly)
 	}
 
-	return held.Path, nil
+	return held.Path, upload.Path, nil
 }
 
-func nameTaken(id, at string) error {
+// freeNameTries bounds how many numbered names keep_both asks the printer
+// about. Each one is a listing of one path.
+//
+// The probe is linear, one listing per number. A printer that holds every
+// one of them is refused after the last.
+const freeNameTries = 99
+
+// freeName finds the first name the printer holds nothing at, numbering the
+// file: part.bgcode becomes part[1].bgcode, then part[2].bgcode. The printer fetches one file at a time, so no transfer of
+// this server can take the name between the probe and the send.
+func freeName(ctx context.Context, entry *device, at string) (string, bool) {
+	for n := 1; n <= freeNameTries; n++ {
+		candidate := numberedName(at, n)
+		if _, held := heldAt(ctx, entry, candidate); !held {
+			return candidate, true
+		}
+	}
+
+	return "", false
+}
+
+// numberedName puts [n] before the file's extension, keeping a two-part
+// extension such as .gcode.gz whole.
+func numberedName(at string, n int) string {
+	dir, name := path.Split(at)
+
+	extension := path.Ext(name)
+	if strings.HasSuffix(strings.ToLower(name), ".gcode.gz") {
+		extension = name[len(name)-len(".gcode.gz"):]
+	}
+
+	return dir + strings.TrimSuffix(name, extension) + "[" + strconv.Itoa(n) + "]" + extension
+}
+
+// nameTaken refuses a send onto a name the printer holds. readOnly is the
+// printer listing its file read-only, which it refuses to delete.
+func nameTaken(id, at string, readOnly bool) error {
 	return fault.PrinterFileNameTaken.
 		New("a file of that name is already on the printer").
-		With(fault.StringParam("device_id", id), fault.StringParam("path", at))
+		With(
+			fault.StringParam("device_id", id), fault.StringParam("path", at),
+			fault.BoolParam("read_only", readOnly),
+		)
 }
 
 // refusedAsHeld reports whether a failed transfer is the printer refusing a

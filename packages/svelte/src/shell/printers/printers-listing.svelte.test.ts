@@ -19,6 +19,8 @@ const row = (id: string, over: Partial<PrinterRow> = {}): PrinterRow => ({
   nozzleTarget: 230,
   bed: 60,
   bedTarget: 60,
+  chamber: undefined,
+  chamberTarget: undefined,
   material: 'PETG',
   statusNote: undefined,
   statusAction: undefined,
@@ -139,8 +141,8 @@ describe('PrintersListing', () => {
       (field) => field !== 'material',
     );
 
-    const headers = [...host.querySelectorAll('th')].map(
-      (head) => head.textContent,
+    const headers = [...host.querySelectorAll('th')].map((head) =>
+      head.textContent.trim(),
     );
     expect(headers).not.toContain('Material');
   });
@@ -148,8 +150,8 @@ describe('PrintersListing', () => {
   it('keeps the two columns a reader cannot put away', async () => {
     const host = await drawIn(WIDE, [row('a')], () => false);
 
-    const headers = [...host.querySelectorAll('th')].map(
-      (head) => head.textContent,
+    const headers = [...host.querySelectorAll('th')].map((head) =>
+      head.textContent.trim(),
     );
     expect(headers).toEqual(['Printer', 'Actions']);
   });

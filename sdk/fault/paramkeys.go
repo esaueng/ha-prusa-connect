@@ -67,6 +67,7 @@ var paramKeys = []string{
 	"previous_firmware",
 	"printer_model",
 	"provider",
+	"read_only",
 	"reason",
 	"relation",
 	"requires",

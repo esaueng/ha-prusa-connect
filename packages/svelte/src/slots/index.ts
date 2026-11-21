@@ -27,7 +27,13 @@ export {
   type SettingOption,
 } from './card-types';
 export { getSlotContext, type SlotContext, setSlotContext } from './context';
-export { fileRefOf, parseFileRef } from './file-ref';
+export { runSlotAction } from './run-action';
+export {
+  fileRefOf,
+  parseFileRef,
+  parsePrinterFileRef,
+  printerFileRefOf,
+} from './file-ref';
 export { matchesFileRef, matchesFileType } from './file-types';
 export { FileView, type FileViewProps } from './file-view';
 export { ComponentUnavailable, defineModule, noComponents } from './host';
@@ -85,6 +91,8 @@ export {
   type SlotRefusal,
   SlotRegistry,
   UndeclaredRegistration,
+  type StoredFileRef,
+  type UploadRequest,
 } from './registry.svelte';
 export { SlotActions, type SlotActionsProps } from './slot-actions';
 export { SlotOutlet, type SlotOutletProps } from './slot-outlet';

@@ -24,6 +24,7 @@ const row = (uuid: string, extra: Record<string, unknown> = {}) => ({
   is_custom: false,
   spools: 0,
   remaining_g: 0,
+  free_g: 0,
   ...extra,
 });
 
@@ -412,6 +413,9 @@ describe('the add dialog', () => {
     await expect
       .element(dialog.getByLabelText('Min nozzle temp'))
       .toHaveValue(220);
+    await expect
+      .element(dialog.getByRole('combobox', { name: 'Material type' }))
+      .toHaveValue('PETG');
     await dialog.getByLabelText('Manufacturer *').fill('Shed');
     await expect
       .element(dialog.getByLabelText('Material name *'))
@@ -455,7 +459,7 @@ describe('the add dialog', () => {
       dialog.getByRole('heading', { name: 'Temperature profile' }).query(),
     ).toBe(null);
     expect(dialog.getByRole('group', { name: 'Presets' }).query()).toBe(null);
-    expect(dialog.getByText('Base material / type *').query()).toBe(null);
+    expect(dialog.getByText('Material type *').query()).toBe(null);
     expect(dialog.getByLabelText('Min nozzle diameter (mm)').query()).toBe(
       null,
     );

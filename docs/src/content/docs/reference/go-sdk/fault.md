@@ -474,10 +474,11 @@ var PrinterFileNameTaken = Register(DomainPrinter(), "FILE_NAME_TAKEN", statusCo
     ShowDetail,
     "device_id",
     "path",
+    "read_only",
 ))
 ```
 
-PrinterFileNameTaken refuses to send a file to a name the printer's storage already holds. The printer refuses such a transfer itself, and replacing its file deletes something the person may want, so the person is asked first and the request carries replace when they agree.
+PrinterFileNameTaken refuses to send a file to a name the printer's storage already holds. The printer refuses such a transfer itself, and replacing its file deletes something the person may want, so the person is asked first and the request carries replace when they agree. read\_only is true for a file the printer refuses to delete now, such as one open on its screen or still arriving, which is not offered to replace.
 
 ### `PrinterJobNotFound` {#fault-printerjobnotfound}
 

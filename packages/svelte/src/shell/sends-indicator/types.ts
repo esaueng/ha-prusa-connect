@@ -6,7 +6,8 @@ export interface SendsIndicatorRow {
   /** The printer's name. */
   readonly printerName: string;
   readonly name: string;
-  readonly step: 'uploading' | 'sending';
+  readonly step:
+    'uploading' | 'waiting' | 'asking' | 'checking' | 'replacing' | 'sending';
   /** From 0 to 1 within the current step. Null while the length is unknown. */
   readonly progress: number | null;
   /** True when the signed-in person started it, in this tab or another. */

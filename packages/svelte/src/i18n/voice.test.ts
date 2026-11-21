@@ -68,6 +68,8 @@ const LABELS = new Set([
   'people.role.changeFor',
   // The caption under the history card.
   'history.note',
+  // The name of the drop choice's option that prints one file of several.
+  'printerDetailFiles.drop.printOne',
 ]);
 
 /** A line whose parts are joined by a middle dot is a legend. */

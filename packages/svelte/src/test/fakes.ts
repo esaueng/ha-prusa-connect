@@ -10,7 +10,7 @@ import type { FleetClient } from '../data/fleet.svelte';
 import type { FleetListingQuery } from '../data/fleet-listing.svelte';
 import type { Device } from '../domain/command';
 import type { ListingStore } from '../primitives';
-import type { RouterNavigation } from '../router/router.svelte';
+import type { DocumentLoad, RouterNavigation } from '../router/router.svelte';
 import type { FleetListingSource } from '../shell/printers/types';
 import type { TagFleetSource } from '../shell/tags/types';
 import type { ModuleLoader } from '../slots/loader.svelte';
@@ -135,7 +135,7 @@ export const fakeLoaderClient = (
           config: {},
           enabled: true,
           generation: 1,
-          kind: 'module',
+          kind: 'sink',
           name: module.namespace,
           namespace: module.namespace,
           required: false,
@@ -268,6 +268,13 @@ export class FakeNavigation implements RouterNavigation {
     this.#entries = this.#entries.map((entry, index) =>
       index === this.#at ? url : entry,
     );
+  }
+
+  /** Every address handed to the browser as a document of its own, with how. */
+  readonly loads: [string, DocumentLoad][] = [];
+
+  load(url: string, how: DocumentLoad): void {
+    this.loads.push([url, how]);
   }
 
   back(): void {

@@ -277,8 +277,15 @@ export const sendFile = (
   source: string,
   path: string,
   replace = false,
+  keepBoth = false,
 ): Promise<SentFile> =>
   client.sendDeviceFile({
     path: { device_id: deviceId },
-    body: { storage, source, path, ...(replace ? { replace: true } : {}) },
+    body: {
+      storage,
+      source,
+      path,
+      ...(replace ? { replace: true } : {}),
+      ...(keepBoth ? { keep_both: true } : {}),
+    },
   });

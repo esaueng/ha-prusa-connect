@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/prusa3d/prusa-connect/sdk/connectorapi"
@@ -447,6 +448,19 @@ type nodePayload struct {
 	// one only when it is asked about that one file, and after a download of
 	// it finishes.
 	Preview string `json:"preview"`
+	// The firmware sends the slicer's own headers of a print file beside the
+	// picture, under the names the slicer wrote them. The print time is text
+	// such as "2h 5m 3s" under the slicer's name, and whole seconds under the
+	// name a file prepared by Connect carries.
+	//
+	// Each is kept raw and read by hand, because a file can write any value
+	// under these names, and a value of another type must not cost the whole
+	// answer.
+	EstimatedText    json.RawMessage `json:"estimated printing time (normal mode)"`
+	EstimatedSeconds json.RawMessage `json:"estimated_print_time"`
+	PrinterModel     json.RawMessage `json:"printer_model"`
+	LayerHeight      json.RawMessage `json:"layer_height"`
+	FilamentType     json.RawMessage `json:"filament_type"`
 }
 
 // fileInfoFrame is a FILE_INFO event as it arrives.
@@ -473,6 +487,10 @@ func listingFrom(raw json.RawMessage) (connectorapi.Listing, bool) {
 
 	directory := fileOf(frame.Data, relativePath(frame.Data.Path))
 	directory.Preview = previewOf(frame.Data.Preview)
+	directory.EstimatedSeconds = estimateOf(frame.Data)
+	directory.PrinterModel = headerText(frame.Data.PrinterModel)
+	directory.LayerHeightMM = layerHeightOf(frame.Data.LayerHeight)
+	directory.Material = headerText(frame.Data.FilamentType)
 
 	entries := make([]connectorapi.File, 0, len(frame.Data.Children))
 	for _, child := range frame.Data.Children {
@@ -497,6 +515,98 @@ func fileOf(node nodePayload, path string) connectorapi.File {
 		Modified:    node.Modified,
 		ReadOnly:    node.ReadOnly,
 	}
+}
+
+// The most one part of a slicer's duration counts, and the longest print this
+// driver hands on. A file that names more is not a print, and adding its parts
+// would overflow.
+const (
+	maxDurationPart  = 1_000_000
+	maxPrintSeconds  = 366 * 24 * 60 * 60
+	secondsPerMinute = 60
+	secondsPerHour   = 60 * secondsPerMinute
+	secondsPerDay    = 24 * secondsPerHour
+)
+
+// estimateOf reads the print time a FILE_INFO carries, in whole seconds, and
+// zero when it names none this driver can read.
+func estimateOf(node nodePayload) int64 {
+	// A number, or the same number written as text. A part of a second is
+	// dropped.
+	var seconds float64
+	if json.Unmarshal(node.EstimatedSeconds, &seconds) != nil {
+		seconds, _ = strconv.ParseFloat(headerText(node.EstimatedSeconds), 64)
+	}
+
+	if seconds >= 1 && seconds <= maxPrintSeconds {
+		return int64(seconds)
+	}
+
+	return slicerDuration(headerText(node.EstimatedText))
+}
+
+// The longest header text kept, and the thickest layer believed. A file
+// writes these, so anything longer or out of bounds is no value.
+const (
+	maxHeaderText = 64
+	maxLayerMM    = 5
+)
+
+// headerText reads a header the slicer wrote as text, and empty for any
+// other type or for text too long to be a name.
+func headerText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) != nil || len(text) > maxHeaderText {
+		return ""
+	}
+
+	return strings.TrimSpace(text)
+}
+
+// layerHeightOf reads the layer height in millimetres, and zero for any other
+// type or a height no printer prints.
+func layerHeightOf(raw json.RawMessage) float64 {
+	var height float64
+	if json.Unmarshal(raw, &height) != nil || height <= 0 || height > maxLayerMM {
+		return 0
+	}
+
+	return height
+}
+
+// slicerDuration reads a duration as PrusaSlicer writes it, such as
+// "1d 2h 5m 3s" or "45m 10s": numbers, each followed by its unit. Anything
+// else, a part out of bounds and a total past a year are zero, because the
+// text is a file's and a wrong time is worse than none.
+func slicerDuration(text string) int64 {
+	var total int64
+
+	for part := range strings.FieldsSeq(text) {
+		// A unit with no number before it leaves "", which ParseInt refuses.
+		count, err := strconv.ParseInt(part[:len(part)-1], 10, 64)
+		if err != nil || count < 0 || count > maxDurationPart {
+			return 0
+		}
+
+		switch part[len(part)-1] {
+		case 'd':
+			total += count * secondsPerDay
+		case 'h':
+			total += count * secondsPerHour
+		case 'm':
+			total += count * secondsPerMinute
+		case 's':
+			total += count
+		default:
+			return 0
+		}
+	}
+
+	if total > maxPrintSeconds {
+		return 0
+	}
+
+	return total
 }
 
 // previewOf decodes the picture a FILE_INFO carries. A field that is not base64

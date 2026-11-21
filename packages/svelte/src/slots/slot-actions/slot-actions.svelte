@@ -5,38 +5,40 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  import { t } from '../../i18n';
   import {
     Button,
     DropdownMenuItem,
     DropdownMenuSeparator,
     RowActions,
-    toast,
   } from '../../primitives';
   import { getSlotContext } from '../context';
   import { matchesDevice } from '../device-selector';
   import { matchesFileRef } from '../file-types';
   import { moduleIcon } from '../navigation';
-  import type { SlotActionsProps } from './types';
+  import { runSlotAction } from '../run-action';
+  import { subjectOf, type SlotActionsProps } from './types';
 
   // Kept whole rather than destructured: the subject's prop sits on only one
   // member of the `ActionOutletTarget` union, and reading it needs the 'in'
-  // narrowing below.
+  // narrowing of `subjectOf`.
   const props: SlotActionsProps = $props();
   const context = getSlotContext();
   const registryInUse = $derived(props.registry ?? context?.registry);
   const loaderInUse = $derived(props.loader ?? context?.loader);
-  const subject = $derived(
-    'deviceId' in props ? props.deviceId : props.fileRef,
-  );
+  const subject = $derived(subjectOf(props));
   // An entry that names file types is in the menu of a file of one of them
-  // only (ADR-20261027-wvj rule 17). An entry with a devices selector is in
-  // the menu of a device that meets it only (ADR-20261110-5np).
+  // only (ADR-20261027-wvj rule 17). A printer file reference splits on its
+  // first colon the way a file reference does, so one reading serves both.
+  // An entry with a devices selector is in the menu of a device that meets
+  // it only (ADR-20261110-5np).
+  const fileOfMenu = $derived(
+    'deviceId' in props ? undefined : subjectOf(props),
+  );
   const entries = $derived(
     (registryInUse?.declaredActions(props.name) ?? []).filter(
       (entry) =>
-        (!('fileRef' in props) ||
-          matchesFileRef(entry.fileTypes, props.fileRef)) &&
+        (fileOfMenu === undefined ||
+          matchesFileRef(entry.fileTypes, fileOfMenu)) &&
         (!('deviceId' in props) || matchesDevice(entry.devices, props.device)),
     ),
   );
@@ -72,29 +74,12 @@
     // the page shows another subject before the bundle has loaded.
     const target = subject;
     running = new Set([...running, key]);
-    try {
-      // The bundle may still be loading when the menu opens: wait for it
-      // before looking for the run function the declaration promised.
-      await loaderInUse?.activate();
-      const row = registryInUse
-        ?.actions(props.name)
-        .find((action) => action.namespace === namespace && action.id === id);
-      if (row === undefined) {
-        toast.error(t('slotActions.missing', { module: namespace }));
-
-        return;
-      }
-
-      await row.run(target);
-    } catch (thrown) {
-      // A synchronous throw and a rejection both land here: `await` turns
-      // the former into the latter before `catch` sees it.
-      toast.error(title, {
-        description: thrown instanceof Error ? thrown.message : String(thrown),
-      });
-    } finally {
-      running = new Set([...running].filter((held) => held !== key));
-    }
+    const slots =
+      registryInUse === undefined
+        ? undefined
+        : { registry: registryInUse, loader: loaderInUse };
+    await runSlotAction(slots, props.name, { namespace, id, title }, target);
+    running = new Set([...running].filter((held) => held !== key));
   };
 </script>
 
@@ -117,7 +102,10 @@
 {/each}
 
 {#if listed.length > 0 || props.items !== undefined}
-  <RowActions name={props.label} class={props.class}>
+  <RowActions
+    name={props.label}
+    class={[props.class, listed.length === 0 && props.itemsOnlyClass]}
+  >
     {#if props.items}
       {@render props.items()}
       {#if listed.length > 0}<DropdownMenuSeparator />{/if}

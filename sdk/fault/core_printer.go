@@ -58,6 +58,8 @@ var (
 	// storage already holds. The printer refuses such a transfer itself, and
 	// replacing its file deletes something the person may want, so the person
 	// is asked first and the request carries replace when they agree.
+	// read_only is true for a file the printer refuses to delete now, such as
+	// one open on its screen or still arriving, which is not offered to replace.
 	PrinterFileNameTaken = Register(DomainPrinter(), "FILE_NAME_TAKEN", statusConflict, Document(
 		"A file of that name is already on the printer",
 		"Ask the person whether to replace the file on the printer. If they agree, send the same "+
@@ -67,6 +69,7 @@ var (
 		ShowDetail,
 		"device_id",
 		"path",
+		"read_only",
 	))
 
 	// PrinterJobNotFound refuses a print id the caller cannot read.

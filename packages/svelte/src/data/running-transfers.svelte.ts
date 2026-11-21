@@ -31,6 +31,10 @@ export interface TransferMoved {
 const movedKey = (moved: TransferMoved): string =>
   JSON.stringify([moved.deviceId, moved.storage, moved.source, moved.path]);
 
+const sentKey = (
+  sent: Pick<TransferMoved, 'deviceId' | 'storage' | 'source'>,
+): string => JSON.stringify([sent.deviceId, sent.storage, sent.source]);
+
 /** One transfer still on its way to a printer, as the store keeps it. */
 export interface RunningTransferRow {
   readonly transferId: string;
@@ -128,6 +132,10 @@ export class RunningTransfers {
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   readonly #awaited = new Set<string>();
   readonly #landed = new SvelteSet<string>();
+  // What runs once a stored file is on its way to a printer, by device,
+  // storage and source. Nothing draws it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  readonly #onItsWay = new Map<string, (path: string) => void>();
   // The transfers a frame named before the store held them, each read for
   // once. Nothing draws it.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -189,6 +197,30 @@ export class RunningTransfers {
     this.#awaited.add(key);
   }
 
+  /**
+   * Runs `run` once this server is sending the stored file `source` to the
+   * printer, or has already landed it there, with the path it lands at: a
+   * send that keeps both files lands under another name than it asked for.
+   * It follows the event stream and not the answer to the send, which comes
+   * only when the transfer has ended. A transfer of that file that fails
+   * first drops it, and a second call for the same file replaces the first.
+   * A send that starts no transfer is taken back with `notOnItsWay`, or a
+   * later send of the same file would run it.
+   */
+  whenOnItsWay(
+    sent: Pick<TransferMoved, 'deviceId' | 'storage' | 'source'>,
+    run: (path: string) => void,
+  ): void {
+    this.#onItsWay.set(sentKey(sent), run);
+  }
+
+  /** Forgets who waits for a file to be on its way, for a send that started none. */
+  notOnItsWay(
+    sent: Pick<TransferMoved, 'deviceId' | 'storage' | 'source'>,
+  ): void {
+    this.#onItsWay.delete(sentKey(sent));
+  }
+
   /** Stops waiting for a file to land, and forgets that it did. */
   forget(moved: TransferMoved): void {
     const key = movedKey(moved);
@@ -237,6 +269,28 @@ export class RunningTransfers {
     const patch = patchOf(event);
     if (patch === undefined) return;
     const id = patch.transferId;
+
+    // Before anything else reads the frame: a transfer this store never
+    // listed still tells whoever waits for its file.
+    const row = this.transfer(id);
+    const sender = row?.deviceId ?? deviceIdOf(event);
+    const storage = row?.storage ?? patch.storage;
+    const source = row?.source ?? patch.source;
+    const landsAt = row?.path ?? patch.path;
+    if (
+      sender !== undefined &&
+      storage !== undefined &&
+      source !== undefined &&
+      landsAt !== undefined
+    ) {
+      const key = sentKey({ deviceId: sender, storage, source });
+      const waiting = this.#onItsWay.get(key);
+      if (waiting !== undefined) {
+        const failed = event.type === SETTLED && patch.state !== TRANSFER_DONE;
+        this.#onItsWay.delete(key);
+        if (!failed) waiting(landsAt);
+      }
+    }
 
     if (event.type === SETTLED) {
       this.#ended.add(id);
@@ -320,6 +374,7 @@ export class RunningTransfers {
     this.#ended.clear();
     this.#landed.clear();
     this.#awaited.clear();
+    this.#onItsWay.clear();
     this.#asked.clear();
     this.#stopping.clear();
     this.#loading = false;

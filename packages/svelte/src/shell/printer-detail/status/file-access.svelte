@@ -7,11 +7,10 @@
   import {
     capabilityFor,
     PRINTER_STATE_LABEL_KEY,
-    printerStateOf,
+    printStateOf,
   } from '../../../domain';
   import {
     describeFault,
-    formatBytes,
     formatDateTime,
     formatDuration,
     formatUnit,
@@ -23,24 +22,22 @@
     Button,
     Card,
     CardContent,
-    ClippedName,
     DataRow,
     DropdownMenuItem,
     EmptyState,
     FaultAlert,
     FileDropzone,
     FileThumbnail,
-    Progress,
     RowActions,
     RowList,
     THUMBNAIL_ROW_MIN_HEIGHT,
   } from '../../../primitives';
   import { jobHref } from '../../jobs/presentation';
   import { stateBadgeVariant } from '../../printers/presentation';
-  import type { SendsIndicatorRow } from '../../sends-indicator';
   import type { PrintRow } from '../info/types';
   import { SaveToStorage } from '../save-to-storage';
   import UploadBlocked from '../upload-blocked.svelte';
+  import PrinterTransfers from './printer-transfers.svelte';
   import {
     commandControl,
     commandProjection,
@@ -48,7 +45,7 @@
     SPLIT_ROW,
     SPLIT_TRAILING,
   } from './presentation';
-  import type { PrinterStatusPanelProps, PrinterTransferRow } from './types';
+  import type { PrinterStatusPanelProps } from './types';
 
   let {
     device,
@@ -99,7 +96,6 @@
    */
   const UPLOAD_ACCEPT = '.gcode,.bgcode,.bbf';
 
-  const PERCENT = 100;
   const MS_PER_SECOND = 1000;
 
   /** How many prints the block shows before deferring to the tab that holds them all. */
@@ -153,16 +149,12 @@
     moving.length > 0 || (uploads?.length ?? 0) > 0 || ingest || block,
   );
 
-  const nameOf = (transfer: PrinterTransferRow): string =>
-    transfer.path.split('/').pop() ?? transfer.path;
-
-  /** Null while the length is unknown, which draws a bar with no fill. */
-  const percentOf = (transfer: PrinterTransferRow): number | null =>
-    transfer.bytesTotal > 0
-      ? (transfer.bytesSent / transfer.bytesTotal) * PERCENT
-      : null;
-
-  const stateOf = (job: PrintRow) => printerStateOf(job.state);
+  const stateOf = (job: PrintRow) =>
+    printStateOf({
+      state: job.state,
+      ended: job.ended !== undefined,
+      outcome: job.outcome,
+    });
 
   // `ended` is what tells a finished print from the running one.
   const spanOf = (job: PrintRow): string | undefined => {
@@ -183,92 +175,17 @@
   );
 
   const printAgain = (job: PrintRow): void => {
-    commands.onCommand(capabilityFor('start_print'), { path: job.path });
+    void commands.onCommand(capabilityFor('start_print'), { path: job.path });
   };
 </script>
 
-{#snippet transferRow(transfer: PrinterTransferRow)}
-  {@const name = nameOf(transfer)}
-  {@const percent = percentOf(transfer)}
-  <div class="flex flex-col gap-2 rounded-sm bg-surface px-3 py-2">
-    <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <ClippedName {name} class="min-w-0 font-mono text-sm" />
-      {#if transfer.bytesTotal > 0}
-        <span
-          class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-        >
-          {formatBytes(transfer.bytesSent)} / {formatBytes(transfer.bytesTotal)}
-        </span>
-      {/if}
-    </div>
-    <div class="flex items-center gap-3">
-      <Progress
-        value={percent}
-        aria-label={t('printerDetailStatus.transfer.label', { name })}
-        class="h-1 flex-1"
-      />
-      {#if percent !== null}
-        <span
-          class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-        >
-          {formatUnit(Math.round(percent), '%')}
-        </span>
-      {/if}
-      <Button
-        variant="ghost"
-        size="sm"
-        class="shrink-0"
-        aria-label={t('printerDetailStatus.transfer.stopFor', { name })}
-        onclick={() => void transfers?.stop(transfer.transferId)}
-      >
-        {t('printerDetailStatus.transfer.stop')}
-      </Button>
-    </div>
-  </div>
-{/snippet}
-
-{#snippet uploadRow(upload: SendsIndicatorRow)}
-  {@const percent = upload.progress === null ? null : upload.progress * PERCENT}
-  <div class="flex flex-col gap-2 rounded-sm bg-surface px-3 py-2">
-    <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <ClippedName name={upload.name} class="min-w-0 font-mono text-sm" />
-      <span class="shrink-0 text-xs text-muted-foreground">
-        {t('printerDetailStatus.transfer.uploading')}
-      </span>
-    </div>
-    <div class="flex items-center gap-3">
-      <Progress
-        value={percent}
-        aria-label={t('printerDetailStatus.transfer.label', {
-          name: upload.name,
-        })}
-        class="h-1 flex-1"
-      />
-      {#if percent !== null}
-        <span
-          class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-        >
-          {formatUnit(Math.round(percent), '%')}
-        </span>
-      {/if}
-      <Button
-        variant="ghost"
-        size="sm"
-        class="shrink-0"
-        aria-label={t('printerDetailStatus.transfer.cancelUploadFor', {
-          name: upload.name,
-        })}
-        onclick={() => onCancelUpload?.(upload.id)}
-      >
-        {t('printerDetailStatus.transfer.cancelUpload')}
-      </Button>
-    </div>
-  </div>
-{/snippet}
-
 {#snippet printRow(job: PrintRow)}
   {#snippet outcome()}
-    <Badge variant={stateBadgeVariant(stateOf(job))}>
+    <Badge
+      variant={stateBadgeVariant(stateOf(job))}
+      mono={false}
+      class="font-mono"
+    >
       {t(PRINTER_STATE_LABEL_KEY[stateOf(job)])}
     </Badge>
   {/snippet}
@@ -332,21 +249,14 @@
 {/snippet}
 
 {#if anything}
-  <Card>
+  <Card radius="md">
     <CardContent class="flex flex-col gap-6">
-      {#if moving.length > 0 || (uploads?.length ?? 0) > 0}
-        <div class="flex flex-col gap-2">
-          <span class={BLOCK_LABEL}>
-            {t('printerDetailStatus.transfer.heading')}
-          </span>
-          {#each uploads ?? [] as upload (upload.id)}
-            {@render uploadRow(upload)}
-          {/each}
-          {#each moving as transfer (transfer.transferId)}
-            {@render transferRow(transfer)}
-          {/each}
-        </div>
-      {/if}
+      <PrinterTransfers
+        {transfers}
+        {uploads}
+        {onCancelUpload}
+        label={BLOCK_LABEL}
+      />
 
       {#if ingest || block}
         <div class={SPLIT_ROW}>

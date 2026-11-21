@@ -98,14 +98,26 @@ func (c *previewCache) put(key previewKey, preview printfile.Preview) {
 }
 
 // store is put with the lock already held.
+//
+// The first answer for a key is kept, with one exception: a picture replaces
+// a verdict of no picture. A printer asked about a file it is still taking
+// answers without the picture, under the version the whole file will have,
+// and the picture it sends a moment later is the truth about that version.
+// Keeping the first answer there left a file without its picture until the
+// server restarted, while the copy on disk held it.
 func (c *previewCache) store(key previewKey, preview printfile.Preview) {
-	if _, seen := c.entries[key]; seen {
-		return
-	}
+	if held, seen := c.entries[key]; seen {
+		if held.Thumbnail != nil || preview.Thumbnail == nil {
+			return
+		}
 
-	c.entries[key] = preview
-	c.order = append(c.order, key)
-	c.bytes += previewBytes(key, preview)
+		c.bytes += previewBytes(key, preview) - previewBytes(key, held)
+		c.entries[key] = preview
+	} else {
+		c.entries[key] = preview
+		c.order = append(c.order, key)
+		c.bytes += previewBytes(key, preview)
+	}
 
 	for len(c.order) > previewCacheEntries || (c.bytes > c.maxBytes && len(c.order) > 1) {
 		oldest := c.order[0]

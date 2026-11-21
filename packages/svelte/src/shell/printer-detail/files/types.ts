@@ -1,5 +1,5 @@
 import type { SaveToStorageProps } from '../save-to-storage';
-import type { Component } from 'svelte';
+import type { Snippet } from 'svelte';
 
 import type {
   DeviceDetail,
@@ -89,12 +89,18 @@ export interface PrinterFilesPanelProps {
    * address whose request fails is drawn as the file's glyph.
    */
   thumbnailFor?: ((path: string) => string | undefined) | undefined;
+  /**
+   * The action menu of one file, drawn by the host so that a module's
+   * entries join the panel's own in one menu. It is handed the panel's items,
+   * or undefined when the panel offers none for the file. A folder never
+   * reaches it. Absent, the panel draws its own menu.
+   */
+  fileActions?: Snippet<[PrinterFileEntry, Snippet | undefined]> | undefined;
 }
 
 /** What one row of the listing may ask of the panel that owns it. */
 export interface PrinterFileRowContext {
   nameOf(entry: PrinterFileEntry): string;
-  glyphOf(entry: PrinterFileEntry): Component;
   thumbnailOf(entry: PrinterFileEntry): string | undefined;
   printControl(entry: PrinterFileEntry): CommandControl | undefined;
   isFirmware(entry: PrinterFileEntry): boolean;
@@ -113,6 +119,8 @@ export interface PrinterFileRowContext {
   onPrint(entry: PrinterFileEntry): void;
   onFlash(entry: PrinterFileEntry): void;
   onDelete(entry: PrinterFileEntry): void;
+  /** The host's menu of one file, as `PrinterFilesPanelProps.fileActions` says. */
+  fileActions?: Snippet<[PrinterFileEntry, Snippet | undefined]> | undefined;
 }
 
 /** One reason a set of files was not deleted, in the words of whoever refused. */

@@ -13,6 +13,12 @@ export const moduleTabId = (namespace: string, id: string): string =>
 interface ModuleTab {
   id: string;
   label: string;
+  /**
+   * Whether the module asks for the tab's page to be cross-origin isolated.
+   * Where the browser can isolate, opening and leaving such a tab loads a new
+   * page.
+   */
+  isolated: boolean;
 }
 
 /**
@@ -58,5 +64,6 @@ export function moduleTabs(
     .map((entry) => ({
       id: moduleTabId(entry.namespace, entry.id),
       label: entry.title,
+      isolated: entry.crossOriginIsolated === true,
     }));
 }

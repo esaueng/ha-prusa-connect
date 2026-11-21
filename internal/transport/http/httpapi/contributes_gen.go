@@ -31,4 +31,8 @@ type ResourceContributes struct {
 	CameraSection []ResourceSection `json:"camera_section,omitempty" doc:"A section under each camera in a printer's Cameras tab. A module draws nothing for a camera it does not know."`
 	// CameraView is the camera-view slot.
 	CameraView []ResourceSection `json:"camera_view,omitempty" doc:"The live view of a camera of a type the module offers, drawn over its picture while a person plays it."`
+	// DeviceFileAction is the device-file-action slot.
+	DeviceFileAction []ResourceAction `json:"device_file_action,omitempty" doc:"An item in the action menu of each file on a printer's Files tab. A folder has none."`
+	// DeviceUploadAction is the device-upload-action slot.
+	DeviceUploadAction []ResourceAction `json:"device_upload_action,omitempty" doc:"A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way."`
 }

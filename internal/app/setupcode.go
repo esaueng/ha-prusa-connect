@@ -414,7 +414,8 @@ func announceOrSpend(
 		return func() {}, nil
 	}
 
-	_, carried := httpapi.AppMount()
+	// Only whether the build carries the app matters here.
+	_, carried := httpapi.AppMount(httpapi.AppOptions{})
 
 	return func() {
 		announcePending(ctx, logger, opts.stderr(), shown, first.Pending(), browserAddresses(core.API),

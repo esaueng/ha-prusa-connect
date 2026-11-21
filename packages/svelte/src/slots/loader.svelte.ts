@@ -415,7 +415,12 @@ export class ModuleLoader {
         continue;
       }
 
-      admissible.push({ namespace, ui, version: instance.module?.version });
+      admissible.push({
+        namespace,
+        self: `${instance.kind}:${instance.name}`,
+        ui,
+        version: instance.module?.version,
+      });
     }
     this.#discovered = true;
     this.#unread = false;
@@ -488,7 +493,7 @@ export class ModuleLoader {
     // One at a time rather than in parallel. A module contributes its pages
     // in the order it is loaded, and a sidebar whose order depends on which
     // bundle answered first would be a different menu on every reload.
-    for (const { namespace, ui, version } of discovery.instances) {
+    for (const { namespace, self, ui, version } of discovery.instances) {
       if (stale()) return;
       if (!keep(namespace) || this.#attempted.has(namespace)) continue;
       this.#attempted.add(namespace);
@@ -526,7 +531,30 @@ export class ModuleLoader {
           store,
           t: translateFor(namespace),
           signal,
+          namespace,
+          self,
           pageHref: (path) => modulePageHref(namespace, path),
+          uploadToPrinter: (deviceId, files, action) => {
+            if (!stale()) {
+              this.registry.requestUpload({
+                namespace,
+                action,
+                deviceId,
+                files,
+              });
+            }
+          },
+          sendToPrinter: (deviceId, stored, action) => {
+            if (!stale()) {
+              this.registry.requestUpload({
+                namespace,
+                action,
+                deviceId,
+                files: [],
+                stored,
+              });
+            }
+          },
           components: this.#componentsFor(namespace, ui, discovery),
           register: buildRegister({
             page: (path, component) => {
@@ -586,6 +614,8 @@ export class ModuleLoader {
 /** One module the listing names, admitted by the version check. */
 interface Instance {
   namespace: string;
+  /** The instance's kind and name, such as `sink:simple-queue`. */
+  self: string;
   ui: ModuleUI;
   /** The release the manifest declared; absent when the listing names none. */
   version: string | undefined;

@@ -126,6 +126,30 @@ describe('SlotRegistry', () => {
     );
   });
 
+  it('carries cross_origin_isolated from the manifest to the declared tabs', () => {
+    const registry = new SlotRegistry();
+    registry.declare('console', {
+      device_tab: [
+        { id: 'console', title: 'Device page', cross_origin_isolated: true },
+        { id: 'log', title: 'Log' },
+      ],
+    });
+
+    expect(
+      registry
+        .declaredSections('device-tab')
+        .map((entry) => [entry.id, entry.crossOriginIsolated]),
+    ).toEqual([
+      ['console', true],
+      ['log', undefined],
+    ]);
+
+    registry.refuse({ namespace: 'console', reason: 'threw', detail: 'boom' });
+    expect(registry.refusedSections('device-tab')[0]?.crossOriginIsolated).toBe(
+      true,
+    );
+  });
+
   // Controller ruling: a module the loader refused shows no tab and no
   // action menu item, so the tab strip and the kebab menu must not draw from
   // a namespace's declaration once it has a refusal against it.
@@ -295,6 +319,47 @@ describe('SlotRegistry', () => {
     expect(registry.pages()).toHaveLength(0);
     expect(registry.sections('settings')).toHaveLength(0);
     expect(registry.refusals()).toHaveLength(1);
+  });
+});
+
+describe('files a module asks to send to a printer', () => {
+  const request = (deviceId: string, action: string) => ({
+    namespace: 'queue',
+    action,
+    deviceId,
+    files: [],
+  });
+
+  it('drops a request for a printer whose page is not open', () => {
+    const registry = new SlotRegistry();
+
+    expect(registry.requestUpload(request('a', 'first'))).toBe(false);
+    registry.openUploads('a');
+
+    expect(registry.uploadFor('a')).toBeUndefined();
+  });
+
+  it('holds every request for an open page, oldest first', () => {
+    const registry = new SlotRegistry();
+    registry.openUploads('a');
+
+    expect(registry.requestUpload(request('a', 'first'))).toBe(true);
+    expect(registry.requestUpload(request('a', 'second'))).toBe(true);
+
+    expect(registry.takeUpload('a')?.action).toBe('first');
+    expect(registry.takeUpload('a')?.action).toBe('second');
+    expect(registry.takeUpload('a')).toBeUndefined();
+  });
+
+  it('drops what waits when the page closes', () => {
+    const registry = new SlotRegistry();
+    const close = registry.openUploads('a');
+    registry.requestUpload(request('a', 'first'));
+
+    close();
+    registry.openUploads('a');
+
+    expect(registry.uploadFor('a')).toBeUndefined();
   });
 });
 

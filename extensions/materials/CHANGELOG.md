@@ -7,6 +7,38 @@ Write the entry in the same change as the code. One bullet per behaviour a
 person outside this repository can observe: a route, a setting, a screen, a
 refusal. Name the route and the setting key, never a function or a file.
 
+## 0.2.7 - 2026-11-19
+
+### Added
+
+- `GET /materials` rows and `GET /materials/{uuid}` carry `free_g`, the grams on the material's spools that no printer holds.
+
+### Changed
+
+- The default order of `GET /materials` puts materials with filament on a spool no printer holds right after the caller's favourites, most filament first. The caller's custom materials without such filament follow them, so they can sit lower than before.
+- A row of the printer header material picker counts only the spools no printer holds, and says how many kilograms are on them.
+
+## 0.2.6 - 2026-11-16
+
+### Added
+
+- Printer headers show Materials assignments. Their material picker is one search: the printer's own reading first, then favourites, then the catalogue, with colour, type and manufacturer as optional filters. It assigns a catalogue material or a spool, gives the tool back to what the printer reports, and stars a material from its row.
+- The printer header material picker can add a spool to the selected material and select the new spool for assignment. The form shows the remaining weight first and expands to show optional fields.
+
+### Changed
+
+- The Tools tab uses the same slot labels as Materials, for example Slot 5.
+- The Tools tab shows a tile per tool, with the label and nozzle on one line. Below them sit the material's colour circle, centred at the same height in every tile, its name and what is left of its spool. Full-width Assign or Change, Unload and Unassign sit at the foot, and the info mark that says why one is refused sits beside the label. Assign and Change open the same material picker as the header chip and the Tools table, in a dialog.
+- A spool row on a material's page offers Unassign for a printer on the host and Unload for a connected print head. While the printer prints or is paused, the row shows why neither is offered.
+
+### Fixed
+
+- The Catalogue and Locations tabs of the extension page have the same padding as the other settings tabs. Catalogue lists its facts as label and value rows, and Download from GitHub sits in the button band at the foot of the pane. The content touched the pane's edges before.
+- The Create custom material, Add material, Edit material and Edit spool dialogs fit the window and scroll. A window shorter than the form hid the title, the close button and the save button, and nothing scrolled them back.
+- The Base material / type field of a custom material shows the chosen type, and stands level with the fields beside it. It showed its own label, cut short, in place of the type.
+- Unload filament on an MMU printer's tools, refused for a reason the page does not know, says the material cannot be changed in the printer's current state. It said the printer was changing filament, though none was happening.
+- The materials list keeps its height while it loads, so the page no longer grows by about a row when the materials arrive.
+
 ## 0.2.5 - 2026-11-16
 
 ### Changed

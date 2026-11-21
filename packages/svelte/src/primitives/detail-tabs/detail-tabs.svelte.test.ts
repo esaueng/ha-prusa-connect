@@ -74,6 +74,35 @@ describe('DetailTabs', () => {
     start.remove();
   });
 
+  // A tab whose opening loads a new page, such as a cross-origin isolated
+  // module tab, does not open on focus. Otherwise a keyboard user could never
+  // move past it.
+  it('opens a tab on Enter rather than on arrow-key focus while one loads a page', async () => {
+    const onChange = vi.fn();
+    await render(DetailTabsProbe, {
+      props: { active: 'files', onChange, loadsPage: true },
+    });
+
+    page.getByRole('tab', { name: 'Files' }).element().focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await expect.element(page.getByRole('tab', { name: 'Info' })).toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Enter}');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('info');
+  });
+
+  it('opens a tab on arrow-key focus while none loads a page', async () => {
+    const onChange = vi.fn();
+    await render(DetailTabsProbe, { props: { active: 'files', onChange } });
+
+    page.getByRole('tab', { name: 'Files' }).element().focus();
+    await userEvent.keyboard('{ArrowRight}');
+
+    expect(onChange).toHaveBeenCalledWith('info');
+  });
+
   // A strip drawn far down the page, such as one in a module's view, must
   // not move the page when it opens. A narrow strip still brings the open
   // tab into its own sight.

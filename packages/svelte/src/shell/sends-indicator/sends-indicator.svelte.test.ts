@@ -106,6 +106,43 @@ describe('SendsIndicator', () => {
     expect(sends.cancelled).toEqual(['job:1']);
   });
 
+  it('says a file waits for the answer about a name the printer holds, with no cancel', async () => {
+    await render(SendsIndicator, {
+      sends: source([
+        { ...uploading, step: 'asking', progress: null, canCancel: false },
+      ]),
+    });
+
+    await openList(1);
+    await expect
+      .element(page.getByText(t('sendsIndicator.asking')))
+      .toBeVisible();
+    expect(
+      page
+        .getByRole('button', {
+          name: t('sendsIndicator.cancelFor', { name: 'cube.bgcode' }),
+        })
+        .elements(),
+    ).toHaveLength(0);
+  });
+
+  it('says a file waits for its printer, and cancels it', async () => {
+    const sends = source([{ ...uploading, step: 'waiting', progress: null }]);
+    await render(SendsIndicator, { sends });
+
+    await openList(1);
+    await expect
+      .element(page.getByText(t('sendsIndicator.waiting')))
+      .toBeVisible();
+    await page
+      .getByRole('button', {
+        name: t('sendsIndicator.cancelFor', { name: 'cube.bgcode' }),
+      })
+      .click();
+
+    expect(sends.cancelled).toEqual(['job:1']);
+  });
+
   it('says who started a file somebody else sent, and offers no stop to a person who may not stop it', async () => {
     await render(SendsIndicator, {
       sends: source([{ ...theirs, startedBy: 'user:ada' }]),

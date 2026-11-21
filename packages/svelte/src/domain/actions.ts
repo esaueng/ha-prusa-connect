@@ -51,6 +51,11 @@ export interface PrintRequest {
    * person has agreed to it after the core answered `FILE_NAME_TAKEN`.
    */
   readonly replace?: boolean | undefined;
+  /**
+   * With a storage, send under a free name beside the file the printer holds
+   * at `path`, such as `usb/bracket[1].bgcode`. The answer's path names it.
+   */
+  readonly keepBoth?: boolean | undefined;
 }
 
 /** What came back: the printer took the command, or it refused and said why. */

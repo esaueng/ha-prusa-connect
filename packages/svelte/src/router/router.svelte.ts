@@ -25,7 +25,26 @@ export interface RouterHistory {
   replaceState(data: unknown, unused: string, url: string): void;
   /** Puts the page back at its top, as a browser does on a new page. */
   scrollToTop(): void;
+  /**
+   * Loads one address outside the app's routing. `assign` loads it as a new
+   * document in this tab, `replace` does the same in place of the current
+   * history entry, and `open` opens it in a new tab. Without it, the router
+   * routes every address itself and never asks the rule `loadDocumentFor` set.
+   */
+  load?(url: string, how: DocumentLoad): void;
 }
+
+/** How `RouterHistory.load` leaves the app's routing for an address. */
+export type DocumentLoad = 'assign' | 'replace' | 'open';
+
+/**
+ * Where an address has to be shown when the app cannot route it in the
+ * current document. `document` is a new document in this tab, `window` a new
+ * tab, and `undefined` lets the app route it. A page the server sends with
+ * headers of its own needs this, because `history.pushState` fetches no
+ * document.
+ */
+export type DocumentRule = (path: string) => 'document' | 'window' | undefined;
 
 /**
  * The two events the router hears: `popstate` for back and forward, and
@@ -49,6 +68,34 @@ export interface RouterTarget {
  */
 export interface RouterNavigation
   extends RouterLocation, RouterHistory, RouterTarget {}
+
+/**
+ * How the browser hands an address over, for `RouterHistory.load`: a new
+ * document in this tab, one in place of the current history entry, or a new
+ * tab opened with `noopener`, which cannot reach this one through
+ * `window.opener`.
+ */
+export const documentLoader =
+  (
+    address: Pick<Location, 'assign' | 'replace'>,
+    open: (url: string, target: string, features: string) => unknown,
+  ): ((url: string, how: DocumentLoad) => void) =>
+  (url, how) => {
+    if (how === 'open') {
+      open(url, '_blank', 'noopener');
+    } else if (how === 'replace') {
+      address.replace(url);
+    } else {
+      address.assign(url);
+    }
+  };
+
+/**
+ * Within this time, a second hand-over of the same address with no move in
+ * between is dropped. A strip with automatic activation reports one press
+ * twice, on focus and on click.
+ */
+const REPEATED_HANDOVER_MS = 1000;
 
 // The DOM lib declares all three as always present, and in a Node test none
 // of them is.
@@ -86,6 +133,9 @@ const browserNavigation = (): RouterNavigation | null => {
     scrollToTop: () => {
       globalThis.scrollTo(0, 0);
     },
+    load: documentLoader(address, (url, target, features) =>
+      globalThis.open(url, target, features),
+    ),
     addEventListener: (type, listener) => {
       globalThis.addEventListener(type, listener);
     },
@@ -243,6 +293,8 @@ export class Router {
   // ponytail: one check at a time, for the one screen that holds a draft.
   // A list of checks when two screens on one page each hold one.
   #leaveCheck: LeaveCheck | undefined;
+  #documentRule: DocumentRule | undefined;
+  #handedOver: { url: string; how: DocumentLoad; at: number } | undefined;
 
   constructor({ known, navigation = browserNavigation() }: RouterOptions) {
     this.#known = known;
@@ -269,6 +321,7 @@ export class Router {
     ) {
       return;
     }
+    if (this.#loaded(next, 'assign')) return;
     const moved = this.#move(next);
     if (moved === undefined) return;
     this.#navigation?.pushState(null, '', moved.url);
@@ -282,6 +335,7 @@ export class Router {
    * after a sign-out, and never a person leaving.
    */
   replace(next: string): void {
+    if (this.#loaded(next, 'replace')) return;
     const moved = this.#move(next);
     if (moved === undefined) return;
     this.#navigation?.replaceState(null, '', moved.url);
@@ -322,6 +376,19 @@ export class Router {
     };
   }
 
+  /**
+   * Asks `rule` before the app routes an address itself, and hands the
+   * address to the browser where it answers `document` or `window`. Returns
+   * the call that stops asking.
+   */
+  loadDocumentFor(rule: DocumentRule): () => void {
+    this.#documentRule = rule;
+
+    return () => {
+      if (this.#documentRule === rule) this.#documentRule = undefined;
+    };
+  }
+
   /** Whether this app has a screen at an address. A query and a fragment are ignored. */
   serves(address: string): boolean {
     return this.#patternFor(addressOf(address).path) !== undefined;
@@ -339,6 +406,7 @@ export class Router {
     this.#search = this.#navigation.search;
     this.#hash = this.#navigation.hash;
     this.#pattern = this.#patternFor(asked);
+    this.#handedOver = undefined;
   }
 
   // Moves the state to an address and answers what to write, or undefined
@@ -360,8 +428,43 @@ export class Router {
     this.#search = address.search;
     this.#hash = address.hash;
     this.#pattern = pattern;
+    this.#handedOver = undefined;
 
     return { url: written(address), newPath };
+  }
+
+  /**
+   * True when the address went to the browser as a document of its own. The
+   * router's state stays as it is, because the page unloads or this tab keeps
+   * showing what it showed. An address this app does not serve, or the one
+   * already shown, is never handed over, and a repeat with no move in between
+   * is taken as done. Back and forward pass `traversal`, and the entry is then
+   * reloaded in place, never opened in a new tab.
+   */
+  #loaded(next: string, how: 'assign' | 'replace', traversal = false): boolean {
+    const rule = this.#documentRule;
+    const navigation = this.#navigation;
+    if (rule === undefined || navigation?.load === undefined) return false;
+    const address = addressOf(next);
+    if (this.#patternFor(address.path) === undefined) return false;
+    if (address.path === this.#path) return false;
+    const where = rule(address.path);
+    if (where === undefined || (traversal && where === 'window')) return false;
+    const url = written(address);
+    const load: DocumentLoad = where === 'window' ? 'open' : how;
+    const now = performance.now();
+    const last = this.#handedOver;
+    if (
+      last?.url === url &&
+      last.how === load &&
+      now - last.at < REPEATED_HANDOVER_MS
+    ) {
+      return true;
+    }
+    this.#handedOver = { url, how: load, at: now };
+    navigation.load(url, load);
+
+    return true;
   }
 
   /** True when the leave check keeps the person off an address that differs from this one. */
@@ -415,6 +518,7 @@ export class Router {
 
         return;
       }
+      if (this.#loaded(asked, 'replace', true)) return;
       this.read();
     };
 

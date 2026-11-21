@@ -132,6 +132,23 @@ jobs:
       matrix:
         extension: ${{ fromJSON(needs.plan.outputs.extensions) }}
 
+    # An extension with a database of its own tests it on SQLite and on this
+    # Postgres. The gate step requires both, so a test cannot skip Postgres.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: authz
+          POSTGRES_PASSWORD: authz
+          POSTGRES_DB: authz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U authz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - name: Checkout code
       uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -171,6 +188,9 @@ jobs:
         key: extension-golangci-lint-${{ runner.os }}-${{ steps.golangci.outputs.version }}
 
     - name: Run the gate of ${{ matrix.extension }}
+      env:
+        AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
+        AUTHZ_REQUIRED_ENGINES: sqlite,postgres
       run: make -C extensions check EXT=${{ matrix.extension }}
 
   # The one result for the whole workflow, under the name the single job had.

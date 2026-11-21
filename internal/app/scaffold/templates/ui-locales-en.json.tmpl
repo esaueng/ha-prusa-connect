@@ -51,6 +51,12 @@
 {{- else if eq .Slot "camera-view"}},
 
   "{{$.Name}}.cameraView.body": "{{.Title}} is drawing the live view of {camera}."
+{{- else if eq .Slot "device-file-action"}},
+
+  "{{$.Name}}.deviceFileAction.absent": "This is not a file on a printer in the fleet this page read."
+{{- else if eq .Slot "device-upload-action"}},
+
+  "{{$.Name}}.deviceUploadAction.absent": "This is not a file on its way to a printer in the fleet this page read."
 {{- end}}
 {{- end}}
 }

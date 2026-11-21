@@ -18,6 +18,7 @@ func TestAPrintNamingHalfASourceIsRefused(t *testing.T) {
 		"a storage with no path inside it": {ID: "p1", Storage: "bench", Path: "usb/part.bgcode"},
 		"a path inside no storage":         {ID: "p1", Source: "part.bgcode", Path: "usb/part.bgcode"},
 		"no file on the printer":           {ID: "p1", Storage: "bench", Source: "part.bgcode"},
+		"keep_both with no storage":        {ID: "p1", Path: "usb/part.bgcode", KeepBoth: true},
 	}
 
 	for name, params := range cases {

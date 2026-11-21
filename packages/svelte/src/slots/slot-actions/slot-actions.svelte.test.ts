@@ -345,6 +345,41 @@ describe('SlotActions', () => {
     expect(run).toHaveBeenCalledWith('local:models/bracket.bgcode');
   });
 
+  it('runs a printer file action with the printer file reference, for its file types', async () => {
+    const registry = registryFor({
+      device_file_action: [
+        {
+          id: 'queue',
+          title: 'Add to queue',
+          destructive: false,
+          file_types: ['.bgcode'],
+        },
+        {
+          id: 'slice',
+          title: 'Slice',
+          destructive: false,
+          file_types: ['.3mf'],
+        },
+      ],
+    });
+    const run = vi.fn(() => Promise.resolve());
+    registry.registerAction('spools', 'device-file-action', 'queue', run);
+
+    await render(SlotActions, {
+      props: {
+        name: 'device-file-action',
+        printerFileRef: 'printer-1:usb/bracket.bgcode',
+        label: 'bracket.bgcode',
+        registry,
+      },
+    });
+
+    await page.getByRole('button', { name: /bracket.bgcode/ }).click();
+    expect(page.getByRole('menuitem', { name: 'Slice' }).query()).toBeNull();
+    await page.getByRole('menuitem', { name: 'Add to queue' }).click();
+    expect(run).toHaveBeenCalledWith('printer-1:usb/bracket.bgcode');
+  });
+
   // A screen with a menu of its own hands its items in, so the person sees
   // one menu and not two.
   it('draws the screen own items in the same menu, with or without an entry', async () => {

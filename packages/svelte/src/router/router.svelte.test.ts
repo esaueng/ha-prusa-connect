@@ -1,8 +1,13 @@
 import { flushSync } from 'svelte';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { FakeNavigation } from '../test/fakes';
-import { matchesPattern, paramsOf, Router } from './router.svelte';
+import {
+  documentLoader,
+  matchesPattern,
+  paramsOf,
+  Router,
+} from './router.svelte';
 
 const KNOWN = ['/', '/settings', '/devices/:id'];
 
@@ -344,4 +349,209 @@ test('a leave check keeps the person on the page the back button would leave', (
 
   stop();
   listening();
+});
+
+// An address the server sends with headers of its own needs a document of its
+// own, so the router hands it to the browser.
+const withRule = (
+  path: string,
+  rule: (path: string) => 'document' | 'window' | undefined,
+): { router: Router; bar: FakeNavigation } => {
+  const opened = open(path);
+  opened.router.loadDocumentFor(rule);
+
+  return opened;
+};
+
+const isolatedDevice = (path: string): 'document' | undefined =>
+  path === '/devices/console' ? 'document' : undefined;
+
+test('an address the document rule names is loaded by the browser and moves nothing', () => {
+  const { router, bar } = withRule('/', isolatedDevice);
+
+  router.path = '/devices/console';
+
+  expect(bar.loads).toEqual([['/devices/console', 'assign']]);
+  expect(router.path).toBe('/');
+  expect(bar.entries).toEqual(['/']);
+});
+
+test('a replace the document rule names is loaded in place of the current entry', () => {
+  const { router, bar } = withRule('/', isolatedDevice);
+
+  router.replace('/devices/console');
+
+  expect(bar.loads).toEqual([['/devices/console', 'replace']]);
+  expect(router.path).toBe('/');
+});
+
+test('an address the rule sends to a window opens there and this tab stays', () => {
+  const { router, bar } = withRule('/', () => 'window');
+
+  router.path = '/settings?tab=a';
+
+  expect(bar.loads).toEqual([['/settings?tab=a', 'open']]);
+  expect(router.path).toBe('/');
+  expect(bar.entries).toEqual(['/']);
+});
+
+test('an address the rule leaves alone is routed by the app', () => {
+  const { router, bar } = withRule('/', isolatedDevice);
+
+  router.path = '/devices/p1';
+
+  expect(bar.loads).toEqual([]);
+  expect(bar.entries).toEqual(['/', '/devices/p1']);
+});
+
+test('the rule is not asked for an address this app does not serve or already shows', () => {
+  const asked: string[] = [];
+  const { router, bar } = withRule('/settings', (path) => {
+    asked.push(path);
+
+    return 'document';
+  });
+
+  router.path = '/nowhere';
+  router.path = '/settings?tab=b';
+
+  expect(asked).toEqual([]);
+  expect(bar.loads).toEqual([]);
+  expect(bar.entries).toEqual(['/settings', '/settings?tab=b']);
+});
+
+test('a link to an address the rule names is taken and handed to the browser', () => {
+  const { router, bar } = withRule('/', isolatedDevice);
+  const stop = router.listen();
+
+  expect(clickOn('/devices/console')).toBe(true);
+  expect(bar.loads).toEqual([['/devices/console', 'assign']]);
+  expect(router.path).toBe('/');
+
+  stop();
+});
+
+test('the call loadDocumentFor returns stops asking the rule', () => {
+  const { router, bar } = open('/');
+  const stop = router.loadDocumentFor(isolatedDevice);
+
+  stop();
+  router.path = '/devices/console';
+
+  expect(bar.loads).toEqual([]);
+  expect(router.path).toBe('/devices/console');
+});
+
+test('one press reported twice hands the address over once', () => {
+  const { router, bar } = withRule('/', isolatedDevice);
+
+  router.path = '/devices/console';
+  router.path = '/devices/console';
+
+  expect(bar.loads).toEqual([['/devices/console', 'assign']]);
+});
+
+test('a window the rule asks for opens once for one press, and again for a later one', () => {
+  vi.useFakeTimers();
+  try {
+    const { router, bar } = withRule('/', () => 'window');
+
+    router.path = '/settings';
+    router.path = '/settings';
+    vi.advanceTimersByTime(5000);
+    router.path = '/settings';
+
+    expect(bar.loads).toEqual([
+      ['/settings', 'open'],
+      ['/settings', 'open'],
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('a press after the app moved elsewhere hands the address over again', () => {
+  const { router, bar } = withRule('/', (path) =>
+    path === '/settings' ? 'window' : undefined,
+  );
+
+  router.path = '/settings';
+  router.path = '/devices/p1';
+  router.path = '/settings';
+
+  expect(bar.loads).toEqual([
+    ['/settings', 'open'],
+    ['/settings', 'open'],
+  ]);
+});
+
+test('a press after back hands the address over again', () => {
+  const bar = new FakeNavigation('/');
+  const router = new Router({ known: KNOWN, navigation: bar });
+  router.path = '/devices/p1';
+  router.loadDocumentFor((path) =>
+    path === '/settings' ? 'window' : undefined,
+  );
+  const stop = router.listen();
+
+  router.path = '/settings';
+  bar.back();
+  router.path = '/settings';
+
+  expect(router.path).toBe('/');
+  expect(bar.loads).toEqual([
+    ['/settings', 'open'],
+    ['/settings', 'open'],
+  ]);
+
+  stop();
+});
+
+test('back to an entry the rule names reloads that entry in place', () => {
+  const bar = new FakeNavigation('/');
+  const router = new Router({ known: KNOWN, navigation: bar });
+  router.path = '/devices/console';
+  router.path = '/settings';
+  router.loadDocumentFor(isolatedDevice);
+  const stop = router.listen();
+
+  bar.back();
+
+  expect(bar.loads).toEqual([['/devices/console', 'replace']]);
+  expect(router.path).toBe('/settings');
+
+  stop();
+});
+
+test('back never opens a window: the entry is routed in the app', () => {
+  const bar = new FakeNavigation('/');
+  const router = new Router({ known: KNOWN, navigation: bar });
+  router.path = '/devices/p1';
+  router.path = '/settings';
+  router.loadDocumentFor(() => 'window');
+  const stop = router.listen();
+
+  bar.back();
+
+  expect(bar.loads).toEqual([]);
+  expect(router.path).toBe('/devices/p1');
+
+  stop();
+});
+
+test('the browser loader assigns, replaces, and opens a tab without a handle', () => {
+  const calls: string[] = [];
+  const load = documentLoader(
+    {
+      assign: (url: string | URL) => calls.push(`assign ${String(url)}`),
+      replace: (url: string | URL) => calls.push(`replace ${String(url)}`),
+    },
+    (url, target, features) => calls.push(`open ${url} ${target} ${features}`),
+  );
+
+  load('/a', 'assign');
+  load('/b', 'replace');
+  load('/c', 'open');
+
+  expect(calls).toEqual(['assign /a', 'replace /b', 'open /c _blank noopener']);
 });

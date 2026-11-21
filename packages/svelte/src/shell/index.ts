@@ -99,11 +99,14 @@ export {
   PrinterInfoPanel,
   type PrinterInfoPanelProps,
   type PrinterPeer,
+  PrinterDialog,
+  PrinterTransfers,
   PrinterStatusPanel,
   type PrinterStatusPanelProps,
   type PrinterTransferRow,
   type PrinterTransferSource,
   type PrintRow,
+  type DropAction,
   DropChoice,
   type DropChoiceProps,
   ReplaceQuestion,
@@ -135,6 +138,8 @@ export {
   type FleetListingSource,
   printerHref,
   type PrinterFieldId,
+  printerModelOf,
+  stateBadgeVariant,
   type PrinterRow,
   PrintersScreen,
   type PrintersScreenProps,
@@ -215,6 +220,7 @@ export {
   type FolderSharing,
   type StoragePlace,
   type StorageRow,
+  type StorageRowFold,
   StorageScreen,
 } from './storage';
 export { ThemeToggle } from './theme-toggle';
@@ -224,3 +230,11 @@ export {
   type SignInScreenProps,
 } from './sign-in';
 export { UserMenu, type UserMenuProps } from './user-menu';
+
+export { default as FilamentColorWheel } from './printer-detail/filament-color-wheel.svelte';
+
+export { default as FilamentPosition } from './printer-detail/filament-position.svelte';
+export {
+  FILAMENT_COLORS,
+  type FilamentColor,
+} from './printers/filament-colors';

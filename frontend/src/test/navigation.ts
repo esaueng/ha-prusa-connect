@@ -1,4 +1,4 @@
-import type { RouterNavigation } from '@prusa/connect-ui/router';
+import type { DocumentLoad, RouterNavigation } from '@prusa/connect-ui/router';
 
 /**
  * A stand-in for the browser's address bar and history, so a test can
@@ -60,6 +60,12 @@ export class FakeNavigation implements RouterNavigation {
     this.#entries = this.#entries.map((entry, index) =>
       index === this.#at ? url : entry,
     );
+  }
+  /** Every address handed to the browser as a document of its own, with how. */
+  readonly loads: [string, DocumentLoad][] = [];
+
+  load(url: string, how: DocumentLoad): void {
+    this.loads.push([url, how]);
   }
 
   back(): void {

@@ -1,6 +1,9 @@
 {
+  "sendsIndicator.asking": "Waiting for your answer",
+  "sendsIndicator.checking": "Checking the printer…",
+  "sendsIndicator.replacing": "Deleting the file on the printer…",
   "sendsIndicator.cancel": "Cancel",
-  "sendsIndicator.cancelFor": "Cancel the upload of {name}",
+  "sendsIndicator.cancelFor": "Cancel {name}",
   "sendsIndicator.heading": "Files on their way",
   "sendsIndicator.label": "Progress of {name} to {printer}",
   "sendsIndicator.sending": "Sending to the printer",
@@ -9,5 +12,6 @@
   "sendsIndicator.stop": "Stop",
   "sendsIndicator.stopFor": "Stop sending {name} to {printer}",
   "sendsIndicator.trigger": "{count, plural, =0 {Files sent to printers} one {# file on its way} other {# files on their way}}",
-  "sendsIndicator.uploading": "Uploading"
+  "sendsIndicator.uploading": "Uploading",
+  "sendsIndicator.waiting": "Waiting for the printer"
 }

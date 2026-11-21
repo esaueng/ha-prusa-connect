@@ -36,7 +36,24 @@ describe('DropChoice', () => {
       .toBeChecked();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(0, undefined);
+  });
+
+  it('offers the action a module runs on a landed file as a choice', async () => {
+    const onConfirm = vi.fn();
+    const action = {
+      namespace: 'simple-queue',
+      id: 'queue',
+      title: 'Add to queue',
+    };
+    await render(DropChoice, {
+      props: props({ onConfirm, actions: [action] }),
+    });
+
+    await page.getByRole('radio', { name: /Add to queue/u }).click();
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(undefined, action);
   });
 
   it('copies only when the person picks it', async () => {
@@ -46,7 +63,7 @@ describe('DropChoice', () => {
     await page.getByRole('radio', { name: /Only copy to printer/u }).click();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(undefined, undefined);
   });
 
   it('does not copy a file picked to print when the printer stops being able to', async () => {
@@ -85,24 +102,83 @@ describe('DropChoice', () => {
       .toBeChecked();
     await page.getByRole('button', { name: 'Confirm' }).click();
 
-    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(undefined, undefined);
   });
 
-  it('only copies several files, because a printer prints one at a time', async () => {
+  it('says how many files in the title, and lists them one a line', async () => {
     await render(DropChoice, {
-      props: props({ names: ['a.bgcode', 'b.bgcode'] }),
+      props: props({ names: ['a.bgcode', 'b.bgcode', 'c.bgcode'] }),
     });
 
     await expect
-      .element(page.getByRole('radio', { name: /Print now/u }))
-      .toBeDisabled();
+      .element(page.getByRole('heading', { name: /^Send 3 files to / }))
+      .toBeVisible();
+    expect(
+      page
+        .getByRole('listitem')
+        .elements()
+        .map((one) => one.textContent),
+    ).toEqual(['a.bgcode', 'b.bgcode', 'c.bgcode']);
+  });
+
+  it('prints the first of several files dropped, and copies the rest', async () => {
+    const onConfirm = vi.fn();
+    await render(DropChoice, {
+      props: props({ names: ['a.bgcode', 'b.bgcode'], onConfirm }),
+    });
+
     await expect
       .element(
-        page.getByText(
-          'A printer prints one file at a time, so several files are only copied.',
-        ),
+        page.getByRole('radio', { name: /Print one of them, copy the rest/u }),
       )
-      .toBeVisible();
+      .toBeChecked();
+    await expect
+      .element(page.getByRole('combobox', { name: 'The file to print' }))
+      .toHaveTextContent('a.bgcode');
+
+    await page.getByRole('button', { name: 'Confirm' }).click();
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(0, undefined);
+  });
+
+  it('prints the file the person picks of several', async () => {
+    const onConfirm = vi.fn();
+    await render(DropChoice, {
+      props: props({ names: ['a.bgcode', 'b.bgcode'], onConfirm }),
+    });
+
+    await page.getByRole('combobox', { name: 'The file to print' }).click();
+    await page.getByRole('option', { name: 'b.bgcode' }).click();
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(1, undefined);
+  });
+
+  it('tells two files of the same name apart by their place', async () => {
+    const onConfirm = vi.fn();
+    await render(DropChoice, {
+      props: props({ names: ['part.bgcode', 'part.bgcode'], onConfirm }),
+    });
+
+    await page.getByRole('combobox', { name: 'The file to print' }).click();
+    await page.getByRole('option').nth(1).click();
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(1, undefined);
+  });
+
+  it('copies several files when the person picks it, and greys out the file to print', async () => {
+    const onConfirm = vi.fn();
+    await render(DropChoice, {
+      props: props({ names: ['a.bgcode', 'b.bgcode'], onConfirm }),
+    });
+
+    await page.getByRole('radio', { name: /Only copy to printer/u }).click();
+    await expect
+      .element(page.getByRole('combobox', { name: 'The file to print' }))
+      .toBeDisabled();
+    await page.getByRole('button', { name: 'Confirm' }).click();
+
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(undefined, undefined);
   });
 
   it('sends nothing when it is cancelled', async () => {

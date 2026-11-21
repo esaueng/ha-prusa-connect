@@ -51,6 +51,52 @@
 />
 
 <Story
+  name="Waiting For The Printer"
+  args={{
+    sends: source([
+      {
+        id: 'job:2',
+        deviceId: 'mk4',
+        printerName: 'MK4 #1',
+        name: 'benchy.bgcode',
+        step: 'waiting',
+        progress: null,
+        ...mine,
+      },
+      {
+        id: 'job:1',
+        deviceId: 'mk4',
+        printerName: 'MK4 #1',
+        name: 'cube.bgcode',
+        step: 'sending',
+        progress: null,
+        ...mine,
+        canCancel: false,
+      },
+    ]),
+  }}
+/>
+
+<!-- A file whose name the printer holds, while the person is asked. -->
+<Story
+  name="Waiting For An Answer"
+  args={{
+    sends: source([
+      {
+        id: 'job:3',
+        deviceId: 'mk4',
+        printerName: 'MK4 #1',
+        name: 'benchy.bgcode',
+        step: 'asking',
+        progress: null,
+        ...mine,
+        canCancel: false,
+      },
+    ]),
+  }}
+/>
+
+<Story
   name="Several Files"
   args={{
     sends: source([

@@ -34,6 +34,10 @@
   const STEP: Record<SendsIndicatorRow['step'], string> = {
     sending: 'sendsIndicator.sending',
     uploading: 'sendsIndicator.uploading',
+    waiting: 'sendsIndicator.waiting',
+    asking: 'sendsIndicator.asking',
+    checking: 'sendsIndicator.checking',
+    replacing: 'sendsIndicator.replacing',
   };
 
   let { sends }: { sends: SendsSource } = $props();
@@ -116,7 +120,8 @@
                   name: row.name,
                   printer: row.printerName,
                 })}
-                class="h-1 flex-1"
+                size="sm"
+                class="flex-1"
               />
               {#if percent !== null}
                 <span
@@ -125,7 +130,7 @@
                   {formatUnit(Math.round(percent), '%')}
                 </span>
               {/if}
-              {#if row.canCancel && row.step === 'uploading'}
+              {#if row.canCancel && row.step !== 'sending'}
                 <Button
                   variant="ghost"
                   size="sm"

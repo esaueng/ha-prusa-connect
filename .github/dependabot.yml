@@ -37,6 +37,8 @@ updates:
       - /extensions/buddy-debug-logs/client
       - /extensions/server-slicing/ui
       - /extensions/server-slicing/client
+      - /extensions/simple-queue/ui
+      - /extensions/simple-queue/client
       - /extensions/threemf/ui
       - /extensions/threemf/client
       - /packages/typescript/testdata/consumers/browser-vite

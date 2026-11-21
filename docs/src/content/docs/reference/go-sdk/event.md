@@ -408,7 +408,7 @@ VocabularyName is what the published index and the API path call this set.
 ### `VocabularyVersion` {#event-vocabularyversion}
 
 ```go
-const VocabularyVersion = "3.8.0"
+const VocabularyVersion = "3.9.0"
 ```
 
 VocabularyVersion is the content version of the core event-type set.
@@ -468,6 +468,14 @@ const TypeDeviceIssuesChanged = CoreNamespace + "device.issues.changed"
 ```
 
 TypeDeviceIssuesChanged reports what the host has found wrong with one device changing.
+
+### `TypeDeviceStateChanged` {#event-typedevicestatechanged}
+
+```go
+const TypeDeviceStateChanged = CoreNamespace + "device.state.changed"
+```
+
+TypeDeviceStateChanged reports the word a device reports for what it is doing changing, such as READY to PRINTING.
 
 ### `TypeDeviceTelemetrySampled` {#event-typedevicetelemetrysampled}
 
@@ -1559,6 +1567,24 @@ type RegistrationRejected struct {
 ```
 
 RegistrationRejected is the data member of com.prusa.connect.device.registration.rejected. It is not permanent: the machine registers again at its next boot and gets a new code.
+
+### `StateChanged` {#event-statechanged}
+
+```go
+type StateChanged struct {
+    // DeviceID is the device whose state changed.
+    DeviceID string `json:"device_id"`
+    // Driver is the connector the device arrived through.
+    Driver string `json:"driver"`
+    // From is the state the device reported before, as the machine spells it.
+    // It is empty when this server held no state for the device.
+    From string `json:"from"`
+    // To is the state the device reports now, as the machine spells it.
+    To string `json:"to"`
+}
+```
+
+StateChanged is the data member of com.prusa.connect.device.state.changed: the word a device reports for what it is doing, such as IDLE, READY or PRINTING, before and after it changed.
 
 ### `TransferProgressed` {#event-transferprogressed}
 

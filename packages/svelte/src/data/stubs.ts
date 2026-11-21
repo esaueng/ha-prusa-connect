@@ -171,12 +171,12 @@ export class StubApiError extends Error {
   override readonly name = 'ApiError';
   readonly code: string;
   readonly status: number;
-  readonly params: Readonly<Record<string, string | number>>;
+  readonly params: Readonly<Record<string, string | number | boolean>>;
 
   constructor(
     code: string,
     status = 403,
-    params: Readonly<Record<string, string | number>> = {},
+    params: Readonly<Record<string, string | number | boolean>> = {},
   ) {
     super(`stub refusal ${code}`);
     this.code = code;

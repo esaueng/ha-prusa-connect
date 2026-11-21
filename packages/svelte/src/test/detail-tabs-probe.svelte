@@ -6,10 +6,12 @@
     active,
     onChange = () => undefined,
     extra = false,
+    loadsPage = false,
   }: {
     active: string;
     onChange?: (id: string) => void;
     extra?: boolean;
+    loadsPage?: boolean;
   } = $props();
 </script>
 
@@ -22,7 +24,7 @@
   tabs={[
     { id: 'status', label: 'Status', panel: status },
     { id: 'files', label: 'Files', panel: files },
-    { id: 'info', label: 'Info' },
+    { id: 'info', label: 'Info', loadsPage },
     ...(extra ? [{ id: 'late', label: 'Late module' }] : []),
   ]}
 />

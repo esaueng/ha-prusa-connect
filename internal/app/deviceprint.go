@@ -107,12 +107,14 @@ func (d *devices) printing(
 			return httpapi.DevicePrintResult{}, err
 		default:
 			out.Transfer = &transfer
+			// keep_both may have sent it under a free name.
+			out.Path = transfer.Path
 		}
 	}
 
 	result, err := d.Command(ctx, principal, id, httpapi.PrinterCommand{
 		Verb: httpapi.StartPrintVerb,
-		Args: map[string]string{httpapi.StartPrintPathArgument: request.Path},
+		Args: map[string]string{httpapi.StartPrintPathArgument: out.Path},
 	})
 	if err != nil {
 		return httpapi.DevicePrintResult{}, err
@@ -229,7 +231,7 @@ func (d *devices) StartPrint(
 
 	select {
 	case transfer := <-started:
-		return httpapi.DevicePrintResult{Path: request.Path, Transfer: &transfer}, nil
+		return httpapi.DevicePrintResult{Path: transfer.Path, Transfer: &transfer}, nil
 	case result := <-printed:
 		return result, nil
 	case err := <-failed:

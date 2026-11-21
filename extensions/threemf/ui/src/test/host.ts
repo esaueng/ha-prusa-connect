@@ -113,6 +113,8 @@ export const stubHost = (
     },
     t: translateFor(NAMESPACE),
     signal: leaving.signal,
+    namespace: NAMESPACE,
+    self: 'sink:test',
     pageHref: (path) => modulePageHref(NAMESPACE, path),
     components: noComponents,
     register: buildRegister({

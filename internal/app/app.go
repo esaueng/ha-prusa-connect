@@ -422,6 +422,7 @@ func serveOver(
 	// connectors were mounted onto the fleet a moment ago. Nothing that reads
 	// them runs until the Reload below.
 	supervision.fleets.bind(fleet)
+	supervision.fleets.bindStates(states)
 	supervision.fleets.bindAdmission(&admissions, graph)
 
 	// A sink that takes samples is handed the whole tree of each printer it
@@ -533,7 +534,8 @@ func serveOver(
 	// Where the web app stands, decided once: this build either carries it or
 	// does not, and core.frontend.enabled was read from the file at load. The
 	// readiness report and the startup line below both say the same word.
-	mounts, appState := withCoreApp(built.mounts, core.Frontend)
+	mounts, appState := withCoreApp(built.mounts, core.Frontend,
+		modulePlane{host: supervision.host, store: store}.IsolatedTab, opts.appMounter())
 
 	// What this server tells the local network about itself. It is built here
 	// and started in listen, because the record names the port bind was
@@ -743,7 +745,7 @@ func serveOver(
 	// which no key in the file can change.
 	logger.InfoContext(ctx, "the web app", "state", appState,
 		"title", core.Frontend.Title, "language", core.Frontend.DefaultLanguage,
-		"theme", core.Frontend.Theme, "skin", core.Frontend.Skin)
+		"theme", core.Frontend.Theme)
 
 	// The metrics the file asked for. `make build` reads the same key to decide
 	// whether the client is linked, so one line says what this binary was built

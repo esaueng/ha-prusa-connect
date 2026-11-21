@@ -178,7 +178,6 @@ export const stubHost = (options: StubOptions = {}): Stub => {
         title: 'Prusa Connect',
         default_language: 'en',
         theme: 'system',
-        skin: 'default',
         printer_address: 'https://192.168.1.5:8443',
         printer_admission: 'approval',
         printer_custom_ca: false,
@@ -261,6 +260,8 @@ export const stubHost = (options: StubOptions = {}): Stub => {
     },
     t: translateFor(NAMESPACE),
     signal: new AbortController().signal,
+    namespace: NAMESPACE,
+    self: 'sink:test',
     pageHref: (path) => modulePageHref(NAMESPACE, path),
     // This module draws no other module's component.
     components: noComponents,

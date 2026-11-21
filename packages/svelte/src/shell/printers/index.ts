@@ -1,4 +1,4 @@
-export { printerHref } from './presentation';
+export { printerHref, printerModelOf, stateBadgeVariant } from './presentation';
 export { default as PrintersScreen } from './printers-screen.svelte';
 export type {
   CameraSource,

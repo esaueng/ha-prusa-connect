@@ -46,6 +46,7 @@
     "previous_firmware",
     "printer_model",
     "provider",
+    "read_only",
     "reason",
     "relation",
     "requires",
@@ -1006,7 +1007,8 @@
       "redacted": false,
       "params": [
         "device_id",
-        "path"
+        "path",
+        "read_only"
       ]
     },
     {

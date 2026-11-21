@@ -134,7 +134,12 @@ func yamlExample(slot manifest.Slot) string {
 	case manifest.FormPage:
 		return fmt.Sprintf("%s:\n  - path: %s\n    title: %s\n    icon: %s\n    hidden: false", key, id, title, icon)
 	case manifest.FormSection:
-		return fmt.Sprintf("%s:\n  - id: %s\n    title: %s", key, id, title)
+		example := fmt.Sprintf("%s:\n  - id: %s\n    title: %s", key, id, title)
+		if slot.CrossOriginIsolated {
+			example += "\n    cross_origin_isolated: false"
+		}
+
+		return example
 	case manifest.FormAction:
 		example := fmt.Sprintf("%s:\n  - id: %s\n    title: %s\n    icon: %s\n    destructive: false",
 			key, id, title, icon)

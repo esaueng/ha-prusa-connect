@@ -304,6 +304,7 @@ type process struct {
 type answer struct {
 	status int
 	body   string
+	header http.Header
 }
 
 func start(t *testing.T, dir, content string) *process {
@@ -541,7 +542,7 @@ func (p *process) try(t *testing.T, method, path, body string) *answer {
 	read, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 
-	return &answer{status: response.StatusCode, body: string(read)}
+	return &answer{status: response.StatusCode, body: string(read), header: response.Header}
 }
 
 // handedOut holds every address freeAddr has returned in this process. The

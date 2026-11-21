@@ -97,6 +97,21 @@ func heldStorages(ctx context.Context, entry *device) (httpapi.DeviceStorages, e
 func (d *devices) Files(
 	ctx context.Context, principal string, id string, path string, refresh bool,
 ) (httpapi.DeviceListing, error) {
+	return d.listFiles(ctx, principal, id, path, refresh, true)
+}
+
+// FilesHeld is Files for a module that asked for what is held: it never waits
+// for the printer, not even the grace a person's cold read is given, and a
+// path nothing is held of is answered as being read.
+func (d *devices) FilesHeld(
+	ctx context.Context, principal string, id string, path string,
+) (httpapi.DeviceListing, error) {
+	return d.listFiles(ctx, principal, id, path, false, false)
+}
+
+func (d *devices) listFiles(
+	ctx context.Context, principal string, id string, path string, refresh, grace bool,
+) (httpapi.DeviceListing, error) {
 	entry, err := d.reachLive(ctx, principal, id, authz.ActionOperate)
 	if err != nil {
 		return httpapi.DeviceListing{}, err
@@ -118,12 +133,14 @@ func (d *devices) Files(
 		return heldListingOf(path, rows, held, failed, read), nil
 	}
 
-	read, mine := d.listings.join(id, path, false)
+	// A read nobody waits the grace for is one no person waits for, so the
+	// printer answers a person's commands ahead of it.
+	read, mine := d.listings.join(id, path, !grace)
 	if mine {
 		d.startListing(ctx, entry, id, path, read)
 	}
 
-	if !held && failed == nil {
+	if grace && !held && failed == nil {
 		grace := time.NewTimer(listingGrace)
 		defer grace.Stop()
 
@@ -543,6 +560,15 @@ func (d *devices) readThumbnail(
 	picture := printfile.Picture(file.Preview)
 	key := previewKey{device: entry.id, path: path, size: file.Size, modified: file.Modified}
 
+	// A file this server is still sending to the printer has no picture the
+	// printer can read yet, and it already reports the length and the time the
+	// whole file will have. Remembering "no picture" for that version would
+	// outlive the transfer, so nothing is remembered and the next request asks
+	// again.
+	if picture == nil && d.arriving(entry.id, path) {
+		return file, nil, nil
+	}
+
 	d.previews.put(key, printfile.Preview{Thumbnail: picture})
 	d.thumbnails.put(key, printfile.Preview{Thumbnail: picture})
 
@@ -553,6 +579,24 @@ func (d *devices) readThumbnail(
 	}
 
 	return file, picture, nil
+}
+
+// arriving reports whether a transfer to this path on this printer is running.
+func (d *devices) arriving(id string, path string) bool {
+	origin, err := deviceOrigin(id)
+	if err != nil {
+		return false
+	}
+
+	asked := strings.TrimPrefix(path, "/")
+
+	for _, record := range d.transfers.running(origin.String()) {
+		if strings.TrimPrefix(record.Destination, "/") == asked {
+			return true
+		}
+	}
+
+	return false
 }
 
 // listedVersion names a file as the held listing of its folder does: by the
@@ -654,6 +698,10 @@ func deviceThumbnail(picture printfile.Thumbnail, size int64, modified int64) ht
 func (d *devices) Send(
 	ctx context.Context, principal string, id string, upload httpapi.DeviceUpload,
 ) (httpapi.DeviceTransfer, error) {
+	if err := httpapi.ValidateUpload(upload); err != nil {
+		return httpapi.DeviceTransfer{}, err
+	}
+
 	return outliveCaller(ctx, d, id, upload.Path, func(relaying context.Context) (httpapi.DeviceTransfer, error) {
 		return d.send(relaying, principal, id, upload, nil, false)
 	})
@@ -724,10 +772,14 @@ func (d *devices) relay(
 
 	// Only asked here. A replace deletes the printer's file below, once every
 	// check that can still refuse the send has passed.
-	replacing, err := d.destination(ctx, entry, id, upload, content, reuse)
+	replacing, at, err := d.destination(ctx, entry, id, upload, content, reuse)
 	if err != nil {
 		return httpapi.DeviceTransfer{}, err
 	}
+
+	// keep_both may have moved the file to a free name. Every step below, the
+	// record and the event stream included, names the path it lands at.
+	upload.Path = at
 
 	// The transfer runs under a context of this plane's own, derived from the
 	// caller's. Cancelling it is how another request stops a transfer: the
@@ -794,7 +846,7 @@ func (d *devices) relay(
 	}
 
 	if refusedAsHeld(err) {
-		return httpapi.DeviceTransfer{}, nameTaken(id, upload.Path)
+		return httpapi.DeviceTransfer{}, nameTaken(id, upload.Path, false)
 	}
 
 	if err != nil {

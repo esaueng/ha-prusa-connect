@@ -89,6 +89,10 @@ type Section struct {
 	// Devices limits an entry of a device slot to the devices it selects. The
 	// zero value is every device. Other slots take none.
 	Devices DeviceSelector
+	// CrossOriginIsolated asks for the entry's page to be sent cross-origin
+	// isolated, so a device page it frames can use SharedArrayBuffer. Only a
+	// slot that allows it takes it.
+	CrossOriginIsolated bool
 }
 
 // Action is one FormAction slot's entry: a run button.
@@ -135,12 +139,13 @@ var (
 )
 
 // entryKeys is the keys one entry of a slot may have: its form's, plus
-// file_types, devices and primary where the slot takes them.
+// file_types, devices, primary and cross_origin_isolated where the slot takes
+// them.
 func entryKeys(keys []string, slot Slot) []string {
 	out := slices.Clone(keys)
 
 	switch slot.Subject {
-	case SubjectFile:
+	case SubjectFile, SubjectPrinterFile:
 		out = append(out, "file_types")
 	case SubjectDevice:
 		out = append(out, "devices")
@@ -149,6 +154,10 @@ func entryKeys(keys []string, slot Slot) []string {
 
 	if slot.Primary {
 		out = append(out, "primary")
+	}
+
+	if slot.CrossOriginIsolated {
+		out = append(out, "cross_origin_isolated")
 	}
 
 	return out
@@ -433,6 +442,10 @@ func readSections(declared map[string]any, slot Slot) ([]Section, error) {
 		}
 
 		if section.Devices, err = readDevices(entry, where); err != nil {
+			return nil, err
+		}
+
+		if section.CrossOriginIsolated, err = truth(entry, where, "cross_origin_isolated"); err != nil {
 			return nil, err
 		}
 

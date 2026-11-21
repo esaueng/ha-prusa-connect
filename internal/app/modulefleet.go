@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/prusa3d/prusa-connect/internal/app/resourcehost"
 	"github.com/prusa3d/prusa-connect/internal/authz"
 	"github.com/prusa3d/prusa-connect/internal/kernel/admission"
 	"github.com/prusa3d/prusa-connect/internal/kernel/deviceissue"
+	"github.com/prusa3d/prusa-connect/internal/kernel/devicestate"
 	"github.com/prusa3d/prusa-connect/internal/kernel/machinetext"
 	"github.com/prusa3d/prusa-connect/internal/kernel/ref"
 	"github.com/prusa3d/prusa-connect/internal/transport/http/httpapi"
@@ -38,6 +40,9 @@ type moduleFleet struct {
 	// Reading the fleet resolves the principal inside the listing; admitting a
 	// device is a permission of its own and is asked for here.
 	grants httpapi.GrantStore
+	// states is the state set each connector instance declared, and nil
+	// where none declared one.
+	states map[string]connectorapi.StateSet
 	// standing is who a call naming nobody runs as, and what it may do.
 	standing moduleStanding
 	// data is the instance's data directory, and empty when the operator
@@ -55,6 +60,7 @@ var _ deviceapi.Fleet = moduleFleet{}
 type moduleDevices interface {
 	httpapi.DeviceFleet
 	FilesNow(ctx context.Context, principal, id, path string) (httpapi.DeviceListing, error)
+	FilesHeld(ctx context.Context, principal, id, path string) (httpapi.DeviceListing, error)
 }
 
 // moduleFleets binds an instance to the fleet it may read.
@@ -69,6 +75,7 @@ type moduleDevices interface {
 // a nil.
 type moduleFleets struct {
 	fleet      moduleDevices
+	states     map[string]connectorapi.StateSet
 	admissions *registrations
 	grants     httpapi.GrantStore
 	log        *refusalLog
@@ -76,6 +83,26 @@ type moduleFleets struct {
 
 // bind fills the holder. It runs once, before any module starts.
 func (m *moduleFleets) bind(fleet moduleDevices) { m.fleet = fleet }
+
+// bindStates fills what says which verbs a device takes in its state. It runs
+// before any module starts, for the reason bind does.
+func (m *moduleFleets) bindStates(installed devicestate.Installed) {
+	m.states = statesByInstance(installed)
+}
+
+// statesByInstance is the declared state sets keyed by connector instance,
+// which is what a device names under driver.
+func statesByInstance(installed devicestate.Installed) map[string]connectorapi.StateSet {
+	out := map[string]connectorapi.StateSet{}
+
+	for _, declaration := range installed.Declarations() {
+		for _, instance := range declaration.Instances {
+			out[instance] = declaration.States
+		}
+	}
+
+	return out
+}
 
 // bindAdmission fills what device.approve needs.
 //
@@ -97,6 +124,7 @@ func (m *moduleFleets) forModule(module resourcehost.Module) deviceapi.Fleet {
 
 	return moduleFleet{
 		fleet:      m.fleet,
+		states:     m.states,
 		admissions: m.admissions,
 		grants:     m.grants,
 		standing:   standingOf(module),
@@ -128,7 +156,7 @@ func (f moduleFleet) List(ctx context.Context, params deviceapi.ListParams) (dev
 
 	items := make([]deviceapi.Device, 0, len(page.Items))
 	for _, item := range page.Items {
-		items = append(items, moduleDevice(item))
+		items = append(items, f.device(item))
 	}
 
 	return deviceapi.Page{
@@ -163,7 +191,7 @@ func (f moduleFleet) Get(ctx context.Context, params deviceapi.GetParams) (devic
 		return deviceapi.Device{}, moduleRefusal(err)
 	}
 
-	return moduleDevice(device), nil
+	return f.device(device), nil
 }
 
 // Command sends one verb to one device.
@@ -324,11 +352,19 @@ func (f moduleFleet) Files(ctx context.Context, params deviceapi.FilesParams) (d
 		return deviceapi.Listing{}, err
 	}
 
-	// Always from the printer. The listing carries no stale mark on the module
-	// wire, so a module has no way to know it should ask again.
-	listing, err := f.fleet.FilesNow(ctx, who, params.ID, params.Path)
+	// From the printer, unless the module asked for what this server holds.
+	// The listing carries no stale mark on the module wire, so a module that
+	// takes the held rows knows only that it asked for them.
+	listing, err := f.listing(ctx, who, params)
 	if err != nil {
 		return deviceapi.Listing{}, moduleRefusal(err)
+	}
+
+	// A held answer is the one marked stale. Without one the listing names the
+	// path as an empty folder, which is a guess: the path may be a file. The
+	// module is told nothing about it.
+	if params.Cached && !listing.Stale {
+		return deviceapi.Listing{Items: []deviceapi.File{}, Limit: limit, Offset: params.Offset}, nil
 	}
 
 	entry := moduleFile(listing.Directory)
@@ -390,9 +426,10 @@ func (f moduleFleet) Print(
 	}
 
 	result, err := f.fleet.StartPrint(ctx, who, params.ID, httpapi.DevicePrint{
-		Storage: params.Storage,
-		Source:  params.Source,
-		Path:    params.Path,
+		Storage:  params.Storage,
+		Source:   params.Source,
+		Path:     params.Path,
+		KeepBoth: params.KeepBoth,
 	})
 	if err != nil {
 		return deviceapi.Started{}, f.printRefusal(ctx, err, params.Path)
@@ -403,7 +440,7 @@ func (f moduleFleet) Print(
 			result.Command.FaultCode, result.Command.MachineReason, result.Command.CommandID)
 	}
 
-	started := deviceapi.Started{CommandID: result.Command.CommandID}
+	started := deviceapi.Started{CommandID: result.Command.CommandID, Path: result.Path}
 	if result.Transfer != nil {
 		started.TransferID = result.Transfer.TransferID
 	}
@@ -535,6 +572,19 @@ func (f moduleFleet) JobHistory(
 	return deviceapi.JobPage{Items: items, Cursor: page.Cursor, Limit: page.Limit}, nil
 }
 
+// listing answers one path: what this server holds of it at once when the
+// module asked for that, and the printer's answer otherwise. A path nothing
+// is held of is answered with no rows while the read it starts runs.
+func (f moduleFleet) listing(
+	ctx context.Context, who string, params deviceapi.FilesParams,
+) (httpapi.DeviceListing, error) {
+	if params.Cached {
+		return f.fleet.FilesHeld(ctx, who, params.ID, params.Path) //nolint:wrapcheck // moduleRefusal names it.
+	}
+
+	return f.fleet.FilesNow(ctx, who, params.ID, params.Path) //nolint:wrapcheck // moduleRefusal names it.
+}
+
 // storages is the root of a device's file tree: the storage devices it
 // reported, windowed.
 func (f moduleFleet) storages(
@@ -627,6 +677,11 @@ func moduleFile(file httpapi.DeviceFile) deviceapi.File {
 		Folder:      file.Folder,
 		Size:        file.Size,
 		ReadOnly:    file.ReadOnly,
+
+		EstimatedSeconds: file.EstimatedSeconds,
+		PrinterModel:     file.PrinterModel,
+		LayerHeightMM:    file.LayerHeightMM,
+		Material:         file.Material,
 	}
 
 	if file.Modified != nil {
@@ -690,6 +745,42 @@ func moduleDevice(device httpapi.Device) deviceapi.Device {
 		Dialog:          moduleDialog(device),
 		Retired:         device.Retired != nil,
 	}
+}
+
+// device is one device as a module reads it, with what its connector declared
+// about the state it is in.
+func (f moduleFleet) device(device httpapi.Device) deviceapi.Device {
+	out := moduleDevice(device)
+
+	set, declared := f.states[device.Driver]
+	if !declared {
+		return out
+	}
+
+	state := connectorapi.StateName(jobText(device.State[printerStatePath]))
+	out.Ready = device.Connected && slices.ContainsFunc(set.Transitions, func(move connectorapi.Transition) bool {
+		return move.Verb == connectorapi.VerbSetPrinterReady && move.To == state
+	})
+
+	if !set.Guarded() {
+		return out
+	}
+
+	out.Accepts = []string{}
+
+	if !device.Connected {
+		return out
+	}
+
+	for _, verb := range device.Capabilities {
+		if set.Accepted(state, connectorapi.Capability(verb)) {
+			out.Accepts = append(out.Accepts, verb)
+		}
+	}
+
+	slices.Sort(out.Accepts)
+
+	return out
 }
 
 // moduleIssues is the listing's issues as the contract publishes them.
