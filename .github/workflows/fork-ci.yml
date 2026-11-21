@@ -50,11 +50,21 @@ jobs:
         cache: pnpm
         cache-dependency-path: packages/typescript/pnpm-lock.yaml
 
+    # Commits that came from prusa3d/prusa-connect were judged there and cannot
+    # be rewritten here. With EXCLUDE_PUBLISHED the scripts skip every commit a
+    # remote-tracking ref holds, so this step leaves exactly two such refs:
+    # the PR base and upstream main.
     - name: Commit messages and changelog entries
       if: ${{ github.event_name == 'pull_request' }}
       env:
+        BASE: ${{ github.event.pull_request.base.sha }}
         RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        EXCLUDE_PUBLISHED: '1'
       run: |
+        set -eu
+        git for-each-ref --format='delete %(refname)' refs/remotes | git update-ref --no-deref --stdin
+        git update-ref refs/remotes/origin/main "$BASE"
+        git fetch --no-tags https://github.com/prusa3d/prusa-connect.git +refs/heads/main:refs/remotes/upstream/main
         make commit-style-check RANGE="$RANGE"
         make changelog-check RANGE="$RANGE"
 
