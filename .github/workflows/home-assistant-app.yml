@@ -3,6 +3,8 @@ name: Home Assistant app
 on:
   workflow_dispatch:
   pull_request:
+  schedule:
+    - cron: '43 8 * * *'
 
 permissions:
   contents: read
@@ -37,3 +39,73 @@ jobs:
           name: ha-prusa-connect-${{ matrix.arch }}
           path: ${{ runner.temp }}/home-assistant/ha-prusa-connect-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
+
+  publish:
+    name: Publish Home Assistant archives
+    needs: package
+    if: >-
+      github.repository == 'esaueng/ha-prusa-connect' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: home-assistant-app-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: ha-prusa-connect-*
+          path: ${{ runner.temp }}/home-assistant
+          merge-multiple: true
+
+      - name: Publish archives for main
+        working-directory: ${{ runner.temp }}/home-assistant
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo 'Main has advanced. Publish from a build of the current main commit.'
+            exit 0
+          fi
+
+          test -s ha-prusa-connect-amd64.tar.gz
+          test -s ha-prusa-connect-aarch64.tar.gz
+          tag="ha-app-$GITHUB_SHA"
+          error="$RUNNER_TEMP/home-assistant-release-error"
+          if ! release=$(gh release view "$tag" --json isDraft,targetCommitish 2>"$error"); then
+            if ! grep -qx 'release not found' "$error"; then
+              cat "$error" >&2
+              exit 1
+            fi
+            gh release create "$tag" --draft --target "$GITHUB_SHA" \
+              --title "Home Assistant app (${GITHUB_SHA:0:12})" --notes-file - <<EOF
+          Home Assistant OS local app built from commit \
+          [$GITHUB_SHA](https://github.com/$GH_REPO/commit/$GITHUB_SHA).
+
+          Download the archive for your Home Assistant device.
+
+          - AMD64 for 64-bit Intel and AMD systems.
+          - ARM64 (aarch64) for 64-bit ARM systems.
+
+          [Installation and update guide](https://github.com/$GH_REPO/blob/$GITHUB_SHA/deploy/home-assistant/ha-prusa-connect/README.md)
+          EOF
+            release=$(gh release view "$tag" --json isDraft,targetCommitish)
+          fi
+
+          if [ "$(jq -r .targetCommitish <<< "$release")" != "$GITHUB_SHA" ]; then
+            echo 'The release target differs from the packaged commit.' >&2
+            exit 1
+          fi
+          if jq -e '.isDraft | not' <<< "$release" >/dev/null; then
+            echo 'The archives for this commit are already published.'
+            exit 0
+          fi
+
+          gh release upload "$tag" ha-prusa-connect-amd64.tar.gz ha-prusa-connect-aarch64.tar.gz --clobber
+          gh release edit "$tag" --draft=false --latest
