@@ -710,6 +710,10 @@ func ps3KeepBed(doc *ordered, ref BedRef) error {
 		return err
 	}
 
+	if err = ps3ClearScripts(container); err != nil {
+		return err
+	}
+
 	kept, err := container.marshal()
 	if err != nil {
 		return err

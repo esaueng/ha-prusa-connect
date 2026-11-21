@@ -30,6 +30,7 @@ and requires this module in its own `go.mod`. Until the module is tagged, a modu
 | `Thumbnails` | reads only the pictures |
 | `ReadMesh` | reads the model parts of one object as triangles |
 | `Rewrite` | writes a copy of a PrusaSlicer project for printing a selection of copies, or the copies `Arrange` placed |
+| `CheckSettings` | refuses a project whose settings make PrusaSlicer run a program after slicing, or write the G-code into another folder |
 | `Arrange` | places copies of objects onto as few beds of one setup as hold them |
 | `ParseObjectsInfo`, `Project.MatchLabels` | tie the objects a sliced G-code file labels back to the instances of the project |
 

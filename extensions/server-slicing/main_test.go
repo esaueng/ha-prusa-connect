@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prusa3d/prusa-connect/sdk/routesapi"
 	"github.com/prusa3d/prusa-connect/sdk/wirerpc"
 
 	"github.com/prusa3d/server-slicing/internal/jobs"
@@ -235,6 +236,44 @@ func TestOnlyAnAdministratorChangesTheSlicers(t *testing.T) {
 
 	if status := r.as(t, root, http.MethodDelete, "/slicers/2.9.6", nil, &refused); status != http.StatusNotFound {
 		t.Fatalf("removing a local binary answered %d %+v", status, refused)
+	}
+}
+
+// Only an administrator is told where a slicer's executable is. Every other
+// person gets the list without paths, and a refusal of every route that
+// changes the slicers.
+func TestOnlyAnAdministratorIsToldWhereTheSlicersAre(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t)
+	binary := stand(t)
+
+	var view slicers.View
+	if status := r.as(t, root, http.MethodGet, "/slicers", nil, &view); status != http.StatusOK ||
+		len(view.Installed) != 1 || view.Installed[0].Path != binary {
+		t.Fatalf("the administrator was answered %d %+v", status, view.Installed)
+	}
+
+	for _, who := range []string{alice, bob} {
+		for _, call := range []struct{ method, path, body string }{
+			{http.MethodGet, "/slicers", ""},
+			{http.MethodPost, "/slicers/install", `{"version":"2.9.6"}`},
+			{http.MethodPost, "/slicers/refresh", ""},
+			{http.MethodDelete, "/slicers/2.9.6", ""},
+			{http.MethodPut, "/slicers/default", `{"version":"2.9.6"}`},
+		} {
+			response := r.call(t, routesapi.Request{
+				Method: call.method, Path: call.path, Principal: who, Body: []byte(call.body),
+			})
+
+			if bytes.Contains(response.Body, []byte(binary)) || bytes.Contains(response.Body, []byte(`"path"`)) {
+				t.Errorf("%s %s as %s told where the slicer is: %s", call.method, call.path, who, response.Body)
+			}
+
+			if call.method != http.MethodGet && response.Status != http.StatusForbidden {
+				t.Errorf("%s %s as %s answered %d", call.method, call.path, who, response.Status)
+			}
+		}
 	}
 }
 

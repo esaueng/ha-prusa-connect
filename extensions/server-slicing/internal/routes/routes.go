@@ -203,6 +203,12 @@ func (s Service) listSlicers(w http.ResponseWriter, r *http.Request, state State
 	answer(w, http.StatusOK, state.Slicers.View(err == nil && administrator))
 }
 
+// administratorView answers the slicers with the executable of each on this
+// server. Only a handler behind administering calls it.
+func administratorView(state State) slicers.View {
+	return state.Slicers.View(true)
+}
+
 // versionBody is the body of the default route.
 type versionBody struct {
 	Version string `json:"version"`
@@ -234,7 +240,7 @@ func (s Service) installSlicer(w http.ResponseWriter, r *http.Request, state Sta
 	case err != nil:
 		refuse(w, StoreFailed, err.Error())
 	default:
-		answer(w, http.StatusAccepted, state.Slicers.View(true))
+		answer(w, http.StatusAccepted, administratorView(state))
 	}
 }
 
@@ -248,7 +254,7 @@ func (s Service) refreshSlicers(w http.ResponseWriter, r *http.Request, state St
 		return
 	}
 
-	answer(w, http.StatusOK, state.Slicers.View(true))
+	answer(w, http.StatusOK, administratorView(state))
 }
 
 func (s Service) removeSlicer(w http.ResponseWriter, r *http.Request, state State, _ string) {
@@ -280,7 +286,7 @@ func (s Service) pinSlicer(w http.ResponseWriter, r *http.Request, state State, 
 	case err != nil:
 		refuse(w, StoreFailed, err.Error())
 	default:
-		answer(w, http.StatusOK, state.Slicers.View(true))
+		answer(w, http.StatusOK, administratorView(state))
 	}
 }
 

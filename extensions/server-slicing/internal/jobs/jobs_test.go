@@ -526,6 +526,59 @@ func TestAProjectOfAnotherSlicerFails(t *testing.T) {
 	}
 }
 
+// A project with a post-processing script fails before any slicer runs, and
+// says why.
+func TestAProjectWithAScriptNeverReachesTheSlicer(t *testing.T) {
+	t.Parallel()
+
+	data, err := fixture.Project{
+		At:       [][2]float64{{100, 100}},
+		Settings: append(append([]string{}, fixture.Bed200...), "post_process = /usr/bin/touch /tmp/owned"),
+		Mode:     "binary",
+	}.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		mu   sync.Mutex
+		runs int
+	)
+
+	w := setUp(t, jobs.Deps{
+		Run: func(ctx context.Context, spec runner.Spec, progress runner.Progress) (runner.Result, error) {
+			mu.Lock()
+			runs++
+			mu.Unlock()
+
+			return runner.Run(ctx, spec, progress)
+		},
+	})
+	w.shelf.put("scripted.3mf", data)
+	w.manager.Start(t.Context())
+
+	job, err := w.manager.Submit(
+		t.Context(),
+		jobs.Request{By: alice, Source: jobs.Source{Storage: "shelf", Path: "scripted.3mf"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := w.wait(t, job.ID)
+	if done.Error == nil || done.Error.Code != jobs.CodeNotAProject ||
+		!strings.Contains(done.Error.Message, "post-processing script") {
+		t.Fatalf("the job ended as %+v", done.Error)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if runs != 0 || w.shelf.writes != 0 {
+		t.Fatalf("the slicer ran %d times and the storage took %d files", runs, w.shelf.writes)
+	}
+}
+
 func TestASlicerThatWritesNothingFailsTheJobWithItsLog(t *testing.T) {
 	t.Parallel()
 
