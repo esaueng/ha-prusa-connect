@@ -35,6 +35,10 @@ spec:
       # then bounds waiting for the supervision plane. A grace period at or
       # below that budget kills the drain the orchestrator asked for.
       terminationGracePeriodSeconds: 30
+      # The server never calls the Kubernetes API, so the pod gets no service
+      # account token. A process that is broken into finds no credential to
+      # reach the cluster with.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         # The uid and gid the image builds, fixed rather than assigned by

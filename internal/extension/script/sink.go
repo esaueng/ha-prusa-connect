@@ -42,6 +42,10 @@ const (
 	// routingKeyHeader carries the key a script computed to an HTTP
 	// destination. A broker routes on the key; an HTTP endpoint reads it here.
 	routingKeyHeader = "X-Prusa-Routing-Key"
+
+	// maxSinkResponseBytes is the most of a destination's answer that is read.
+	// The answer is thrown away, so reading more only costs time and traffic.
+	maxSinkResponseBytes = 64 << 10
 )
 
 // ErrInvalidSettings reports a script sink's configuration block the host will
@@ -110,10 +114,17 @@ func NewSink(source string, config json.RawMessage, logger *slog.Logger, emitter
 		logger = slog.New(slog.DiscardHandler)
 	}
 
+	client := &http.Client{
+		Timeout: timeout,
+		// Redirects are not followed. A redirect could point this server at a
+		// host the operator did not declare.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+
 	return &Sink{
 		program:   program,
 		endpoints: endpoints,
-		client:    &http.Client{Timeout: timeout},
+		client:    client,
 		bus:       emitter,
 		log:       logger,
 		now:       time.Now,
@@ -276,13 +287,19 @@ func (s *Sink) post(message scriptapi.Message, address string) {
 		return
 	}
 
+	// The body is read to the end so the connection can be reused. Past
+	// maxSinkResponseBytes the connection is not worth the read, and is closed.
 	defer func() {
-		_, _ = io.Copy(io.Discard, response.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxSinkResponseBytes))
 		_ = response.Body.Close()
 	}()
 
-	if response.StatusCode >= http.StatusBadRequest {
+	switch {
+	case response.StatusCode >= http.StatusBadRequest:
 		s.log.Warn("the destination refused the message",
+			"endpoint", message.Endpoint, "status", response.StatusCode)
+	case response.StatusCode >= http.StatusMultipleChoices:
+		s.log.Warn("the destination answered with a redirect, which is not followed",
 			"endpoint", message.Endpoint, "status", response.StatusCode)
 	}
 }

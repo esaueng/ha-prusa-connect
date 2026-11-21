@@ -395,3 +395,125 @@ func (r *recordedSubjects) Get(_ context.Context, principal string) (auth.OIDCSu
 
 	return found, nil
 }
+
+// discoveryOnlyClient is a client for an issuer that answers discovery and
+// nothing else. Begin never calls the issuer, so the tests of the table of
+// logins in flight need no running provider.
+func discoveryOnlyClient(t *testing.T) *oidc.Client {
+	t.Helper()
+
+	var stub *httptest.Server
+
+	stub = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                           stub.URL,
+			"authorization_endpoint":           stub.URL + "/authorize",
+			"token_endpoint":                   stub.URL + "/oauth/token",
+			"jwks_uri":                         stub.URL + "/.well-known/jwks.json",
+			"code_challenge_methods_supported": []string{oidc.ChallengeMethodS256},
+		}); err != nil {
+			t.Errorf("writing the discovery document: %v", err)
+		}
+	}))
+	t.Cleanup(stub.Close)
+
+	client, err := oidc.New(t.Context(), oidc.Config{
+		Issuer:      stub.URL,
+		ClientID:    defaultClientID,
+		RedirectURI: defaultRedirectURI,
+		HTTPClient:  noRedirectClient(),
+	})
+	require.NoError(t, err)
+
+	return client
+}
+
+// clock is a time a test moves by hand.
+type clock struct{ at time.Time }
+
+func (c *clock) now() time.Time { return c.at }
+
+func fillPending(t *testing.T, login *Login, n int) {
+	t.Helper()
+
+	for range n {
+		_, err := login.Begin(t.Context())
+		require.NoError(t, err)
+	}
+}
+
+// TestAFullTableRefusesANewLoginAndKeepsTheWaitingOnes bounds the memory a
+// caller with no credential can make the server hold. The new login is refused
+// and the waiting ones are kept, because each of them may be a person halfway
+// through the issuer's screens.
+func TestAFullTableRefusesANewLoginAndKeepsTheWaitingOnes(t *testing.T) {
+	t.Parallel()
+
+	start := &clock{at: time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)}
+	login := NewLogin(discoveryOnlyClient(t), auth.NewMemoryStore(), start.now)
+
+	first, err := login.Begin(t.Context())
+	require.NoError(t, err)
+
+	fillPending(t, login, MaxPending-1)
+	require.Equal(t, MaxPending, login.Pending())
+
+	start.at = start.at.Add(PendingTTL - time.Second)
+
+	_, err = login.Begin(t.Context())
+	require.ErrorIs(t, err, ErrTooManyPending)
+	require.Equal(t, MaxPending, login.Pending(), "a refused login must not push out one in flight")
+
+	login.mu.Lock()
+	_, kept := login.pending[first.State]
+	login.mu.Unlock()
+	require.True(t, kept, "the oldest login was dropped to make room")
+}
+
+// TestAFullTableTakesBackExpiredLogins shows that the cap refuses only while
+// the logins it holds are still live. Once they expire, Begin reclaims them
+// without waiting for the next periodic sweep.
+func TestAFullTableTakesBackExpiredLogins(t *testing.T) {
+	t.Parallel()
+
+	start := &clock{at: time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)}
+	login := NewLogin(discoveryOnlyClient(t), auth.NewMemoryStore(), start.now)
+
+	fillPending(t, login, MaxPending)
+
+	start.at = start.at.Add(PendingTTL + time.Second)
+
+	_, err := login.Begin(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, login.Pending(), "the expired logins were not taken back")
+}
+
+// TestBeginSweepsAtMostOncePerInterval keeps a burst of logins from costing
+// the square of its size. A login that expired is kept until sweepInterval has
+// passed since the last sweep, as long as the table has room.
+func TestBeginSweepsAtMostOncePerInterval(t *testing.T) {
+	t.Parallel()
+
+	start := &clock{at: time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)}
+	login := NewLogin(discoveryOnlyClient(t), auth.NewMemoryStore(), start.now)
+	origin := start.at
+
+	// The first Begin sweeps and starts the interval.
+	fillPending(t, login, 1)
+
+	// This one sweeps too, a whole interval later, and finds nothing expired.
+	start.at = origin.Add(PendingTTL - 10*time.Second)
+	fillPending(t, login, 1)
+
+	// The first login has now expired, but the last sweep was 15 seconds ago.
+	start.at = origin.Add(PendingTTL + 5*time.Second)
+	fillPending(t, login, 1)
+	require.Equal(t, 3, login.Pending(), "Begin swept again inside the interval")
+
+	// One interval after the last sweep, the expired login goes.
+	start.at = origin.Add(PendingTTL - 10*time.Second + sweepInterval)
+	fillPending(t, login, 1)
+	require.Equal(t, 3, login.Pending(), "the expired login outlived the next sweep")
+}

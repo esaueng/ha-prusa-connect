@@ -50,6 +50,9 @@ func newStills(cfg Config, authorize credential) *stills {
 					MinVersion:         tls.VersionTLS12,
 				},
 			},
+			// Redirects are not followed. A redirect could point this server,
+			// and the camera's credential, at a host the operator did not name.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		endpoint:  cfg.SnapshotURL,
 		authorize: authorize,

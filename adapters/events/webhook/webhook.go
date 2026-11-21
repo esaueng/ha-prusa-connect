@@ -130,7 +130,14 @@ func New(spec eventsapi.ProviderSpec) (eventsapi.Processor, error) {
 	}
 
 	p := &Processor{
-		client:  &http.Client{Timeout: cfg.Timeout, Transport: transport},
+		client: &http.Client{
+			Timeout:   cfg.Timeout,
+			Transport: transport,
+			// Redirects are not followed. A redirect could point this server,
+			// and the headers the operator set, at a host the operator did not
+			// name. A 3xx answer counts as a failed delivery.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 		url:     cfg.URL,
 		header:  cfg.Header,
 		queue:   make(chan event, cfg.QueueDepth),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -21,6 +22,22 @@ const (
 	callbackPath = "/api/v1/auth/callback"
 	logoutPath   = "/api/v1/auth/logout"
 )
+
+// Starting a login takes no credential and makes the server remember a state
+// for ten minutes, so one address may start only so many. The bound sits well
+// above what a person clicking "sign in" reaches, and well below what fills
+// the server's table of logins in flight.
+const (
+	loginsPerAddress  = 30
+	loginAddressSpan  = 10 * time.Minute
+	loginAddressTable = 4096
+)
+
+// loginsBusyWait is the Retry-After a caller gets when the server already
+// holds as many logins in flight as it will. Begin reclaims every expired
+// login while the table is full, so a minute is enough for some to finish or
+// expire.
+const loginsBusyWait = time.Minute
 
 // postLoginPath is where a completed login leaves the browser. It is the
 // application root and not an operation: the person who started the login
@@ -41,7 +58,9 @@ const cookiePath = "/"
 // implementation that refuses to begin a login, the same way a deployment
 // with no authentication wires a Principals that resolves nobody.
 type Sessions interface {
-	// Begin starts a login and says where to send the browser.
+	// Begin starts a login and says where to send the browser. An error with
+	// a Busy method that reports true means it holds as many logins in flight
+	// as it will, and the caller is answered 429.
 	Begin(ctx context.Context) (Redirect, error)
 	// Complete turns the issuer's callback into a credential this server
 	// issued. Every refusal it gives reads the same, whatever caused it.
@@ -144,12 +163,14 @@ type logoutOutput struct {
 // whatever the process was wired with, so the document a client generates from
 // does not depend on whether this deployment has an issuer.
 func registerAuth(api huma.API, cfg Config) {
-	registerBeginLogin(api, cfg.Sessions)
+	limiter := newAddressLimiter(loginsPerAddress, loginAddressSpan, loginAddressTable)
+
+	registerBeginLogin(api, cfg, limiter)
 	registerCompleteLogin(api, cfg)
 	registerLogout(api, cfg)
 }
 
-func registerBeginLogin(api huma.API, sessions Sessions) {
+func registerBeginLogin(api huma.API, cfg Config, limiter *addressLimiter) {
 	register(api, huma.Operation{
 		OperationID: "begin-login",
 		Method:      http.MethodGet,
@@ -157,13 +178,20 @@ func registerBeginLogin(api huma.API, sessions Sessions) {
 		Summary:     "Start a login",
 		Description: "Redirects to the configured issuer with a fresh state, nonce and PKCE challenge. " +
 			"The verifier stays on this server, which is what binds the callback to the request that " +
-			"started it. A deployment with no issuer refuses here rather than admitting the caller.",
+			"started it. A deployment with no issuer refuses here rather than admitting the caller. " +
+			"One address may start 30 logins in ten minutes. Past that, or while the server holds as " +
+			"many unfinished logins as it will, the answer is 429 with Retry-After.",
 		Tags:          []string{"auth"},
 		Security:      noSecurity,
 		DefaultStatus: http.StatusSeeOther,
-		Errors:        []int{http.StatusUnauthorized, http.StatusInternalServerError},
+		Errors:        []int{http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusInternalServerError},
 	}, func(ctx context.Context, _ *struct{}) (*beginLoginOutput, error) {
-		redirect, err := sessions.Begin(ctx)
+		address := clientAddress(cfg, requestFrom(ctx))
+		if address != "" && !limiter.take(address, time.Now()) {
+			return nil, beginLimitedFault("this address has started too many logins", loginAddressSpan)
+		}
+
+		redirect, err := cfg.Sessions.Begin(ctx)
 		if err != nil {
 			return nil, beginFault(err)
 		}
@@ -285,10 +313,30 @@ func expiredCookie(cfg Config) http.Cookie {
 // process has no issuer is a refusal. A login that could not start because the
 // random source failed is the server's failure, and a refusal would send the
 // caller to check their credentials.
-func beginFault(err error) *fault.Fault {
+//
+// An error with a Busy method that reports true is a server holding as many
+// logins in flight as it will. The caller can try again later, so it is a 429
+// and not the server's failure.
+func beginFault(err error) error {
 	if raised, ok := errors.AsType[*fault.Fault](err); ok {
 		return raised
 	}
 
+	if busy, ok := errors.AsType[interface {
+		error
+		Busy() bool
+	}](err); ok && busy.Busy() {
+		return beginLimitedFault("too many logins are waiting on this server", loginsBusyWait)
+	}
+
 	return httpfault.Unexpected("start a login")
+}
+
+// beginLimitedFault answers a login that may not start yet with the wait, in
+// the body and in Retry-After.
+func beginLimitedFault(detail string, wait time.Duration) error {
+	seconds := int64(wait / time.Second)
+	limited := loginLimited.New(detail).With(fault.IntParam(RetryAfterParam, seconds))
+
+	return huma.ErrorWithHeaders(limited, http.Header{"Retry-After": []string{strconv.FormatInt(seconds, 10)}})
 }
