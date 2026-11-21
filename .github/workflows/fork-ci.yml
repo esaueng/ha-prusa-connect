@@ -1,0 +1,349 @@
+# The checks this fork runs on a pull request and on main.
+#
+# The workflows that came from prusa3d/prusa-connect stay in this folder,
+# unchanged, so that a sync from upstream does not conflict on them. They are
+# turned off in the repository settings (`gh workflow disable`), and this file
+# replaces them. `CI OK` is the one required check.
+#
+# The race detector and the sign-in tests at real OpenID Connect providers do
+# not run here. `Fork nightly` runs the race detector once a day, and
+# `Home Assistant app` builds both architectures daily and publishes them.
+
+name: Fork CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gates:
+    name: Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      with:
+        package_json_file: packages/typescript/package.json
+
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+        cache-dependency-path: packages/typescript/pnpm-lock.yaml
+
+    - name: Commit messages and changelog entries
+      if: ${{ github.event_name == 'pull_request' }}
+      env:
+        RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+      run: |
+        make commit-style-check RANGE="$RANGE"
+        make changelog-check RANGE="$RANGE"
+
+    - name: Changed extensions raised their version
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+      run: sh extensions/scripts/check-version-bump.sh "$BASE"
+
+    - name: Repository gates
+      if: ${{ !cancelled() }}
+      run: |
+        make style-check
+        make makefile-check
+        make workflows-check
+        make secrets-check
+        make arch-check
+
+    - name: Generated files and published contracts
+      if: ${{ !cancelled() }}
+      run: |
+        make openapi-check
+        make api-check
+        make vocab-check
+        make error-codes-check
+        make extensions-check
+        make sdk-check
+        make capabilities-check
+        make resource-kinds-check
+        make authz-vocabulary-check
+        make event-types-check
+        make slots-check
+        make device-issues-check
+        make device-models-check
+        make sdk-reference-check
+        make config-reference-check
+        make client-sdk-check
+
+    - name: Every binary builds inside its size budget
+      if: ${{ !cancelled() }}
+      run: make binary-check
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Read the golangci-lint pin
+      id: golangci
+      run: echo "version=$(sed -n 's/^GOLANGCI_VERSION = //p' Makefile)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/go/bin/golangci-lint
+        key: golangci-lint-${{ runner.os }}-${{ steps.golangci.outputs.version }}
+
+    - run: make lint
+
+  go-test:
+    name: Go tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [ app, demo, httpapi, authz, internal, rest, modules ]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: authz
+          POSTGRES_PASSWORD: authz
+          POSTGRES_DB: authz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U authz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
+      AUTHZ_REQUIRED_ENGINES: sqlite,postgres
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Run the ${{ matrix.shard }} shard
+      if: ${{ matrix.shard != 'modules' }}
+      run: make test-shard SHARD=${{ matrix.shard }}
+
+    # The modules beside the core, and the printer build's tags.
+    - name: Run the sdk, packages and printer-build tests
+      if: ${{ matrix.shard == 'modules' }}
+      run: |
+        (cd sdk && go test -short ./...)
+        for mod in packages/*/go.mod; do
+          dir=${mod%/go.mod}
+          echo "-> $dir"
+          (cd "$dir" && go test -short -count=1 ./...)
+        done
+        make test-printer
+
+  web:
+    name: Web and docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      with:
+        package_json_file: packages/typescript/package.json
+
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+        cache-dependency-path: |
+          packages/typescript/pnpm-lock.yaml
+          packages/svelte/pnpm-lock.yaml
+          frontend/pnpm-lock.yaml
+          docs/pnpm-lock.yaml
+
+    - name: Fetch the Chromium the browser tests run in
+      working-directory: packages/svelte
+      run: pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium
+
+    - name: Component library
+      run: |
+        make client-ui-lint
+        make client-ui-svelte-check
+        make client-ui-test
+
+    - name: Web application
+      if: ${{ !cancelled() }}
+      run: make frontend-check
+
+    - name: Documentation site
+      if: ${{ !cancelled() }}
+      run: |
+        make install-docs-deps
+        make docs-check
+
+  extensions:
+    name: Extensions
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: authz
+          POSTGRES_PASSWORD: authz
+          POSTGRES_DB: authz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U authz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    # A pull request checks the extensions it changes, or every extension when
+    # it changes sdk/. A push to main checks every extension.
+    - name: Choose the extensions to check
+      id: plan
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -eu
+        all=$(cd extensions && for m in */module.yaml; do dirname "$m"; done | tr '\n' ' ')
+        if [ -z "$BASE" ] || git diff --name-only "$BASE" HEAD -- sdk/ extensions/scripts/ extensions/extension.mk extensions/Makefile | grep -q .; then
+          picked=$all
+        else
+          picked=""
+          for ext in $all; do
+            if git diff --name-only "$BASE" HEAD -- "extensions/$ext/" | grep -q .; then
+              picked="$picked $ext"
+            fi
+          done
+        fi
+        echo "extensions=$picked" >> "$GITHUB_OUTPUT"
+        echo "Checking:${picked:- nothing}"
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      if: ${{ steps.plan.outputs.extensions != '' }}
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      if: ${{ steps.plan.outputs.extensions != '' }}
+      with:
+        package_json_file: packages/typescript/package.json
+
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      if: ${{ steps.plan.outputs.extensions != '' }}
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+        cache-dependency-path: |
+          packages/typescript/pnpm-lock.yaml
+          packages/svelte/pnpm-lock.yaml
+          extensions/**/pnpm-lock.yaml
+
+    - name: Check the chosen extensions
+      if: ${{ steps.plan.outputs.extensions != '' }}
+      env:
+        AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
+        AUTHZ_REQUIRED_ENGINES: sqlite,postgres
+        EXTENSIONS: ${{ steps.plan.outputs.extensions }}
+      run: |
+        make -C extensions shape
+        failed=""
+        for ext in $EXTENSIONS; do
+          echo "::group::$ext"
+          make -C extensions check EXT="$ext" || failed="$failed $ext"
+          echo "::endgroup::"
+        done
+        if [ -n "$failed" ]; then
+          echo "::error::failed:$failed"
+          exit 1
+        fi
+
+  home-assistant:
+    name: Home Assistant app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        persist-credentials: false
+
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+    - name: Package the app
+      run: sh scripts/package-home-assistant.sh amd64 "$RUNNER_TEMP/home-assistant"
+
+    - name: Test the app
+      run: bash scripts/check-home-assistant-app.sh "$RUNNER_TEMP/home-assistant/ha-prusa-connect-amd64.tar.gz"
+
+    - name: Build the server image
+      if: ${{ !cancelled() }}
+      run: docker buildx build --load --file docker/server/Dockerfile --tag prusa-connect:ci .
+
+    - name: The server image runs as non-root and answers its probes
+      if: ${{ !cancelled() }}
+      run: |
+        bash scripts/check-container-nonroot.sh prusa-connect:ci
+        bash scripts/check-container-probes.sh prusa-connect:ci
+
+  ci-ok:
+    name: CI OK
+    if: ${{ always() }}
+    needs: [ gates, lint, go-test, web, extensions, home-assistant ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Every job passed
+      env:
+        NEEDS: ${{ toJSON(needs) }}
+      run: |
+        echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+        echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null
