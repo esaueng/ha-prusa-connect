@@ -20,7 +20,7 @@ import type {
   TransferMoved,
   Transfers,
 } from '@prusa/connect-ui/data';
-import { runningTransferOf } from '@prusa/connect-ui/data';
+import { runningTransferOf, TRANSFER_RUNNING } from '@prusa/connect-ui/data';
 
 /** What this store reads of the Storage store. */
 export type SendsStorage = Pick<
@@ -41,16 +41,25 @@ export type SendsRunning = Pick<
   | 'progress'
   | 'landedAt'
   | 'awaitLanding'
+  | 'whenOnItsWay'
+  | 'notOnItsWay'
   | 'forget'
   | 'stop'
   | 'stopping'
+  | 'load'
 >;
 
 /**
- * Where one file still going somewhere is: on its way to this server, or on
- * its way from this server to the printer.
+ * Where one file still going somewhere is: on its way to this server, on this
+ * server waiting for its printer to finish the file before it, waiting for the
+ * person to answer about a name the printer holds, on this server while it
+ * asks the printer about the name or deletes the printer's file to replace
+ * it, or on its way from this server to the printer. A row is `'checking'`
+ * or `'replacing'` while its job is sending and no transfer for it is listed
+ * yet.
  */
-export type SendStep = 'uploading' | 'sending';
+export type SendStep =
+  'uploading' | 'waiting' | 'asking' | 'checking' | 'replacing' | 'sending';
 
 /**
  * What a send ended with. A job ended by `reset()` answers `'cancelled'`.
@@ -68,6 +77,8 @@ export interface SendRow {
   /** The printer's name. */
   readonly printerName: string;
   readonly name: string;
+  /** Where the file lands on the printer, such as `usb/cube.bgcode`. */
+  readonly path: string;
   readonly step: SendStep;
   /** From 0 to 1 within the current step. Null while the length is unknown. */
   readonly progress: number | null;
@@ -99,6 +110,8 @@ interface Job {
   /** True when the printer starts the file once it lands. */
   readonly print: boolean;
   readonly step: SendStep;
+  /** True once the person chose to replace the printer's file. */
+  readonly replacing?: boolean;
   /** The bytes of a temporary copy sent so far, and of the whole file. */
   readonly sent: number;
   readonly total: number;
@@ -113,6 +126,69 @@ const movedOf = (job: Job): TransferMoved => ({
   source: job.source,
   path: job.destination,
 });
+
+// How often a file waiting for a free printer has the running transfers read
+// again.
+const RECHECK_MS = 30_000;
+
+// Whether the person is still asked about the name this job's file met on
+// its printer.
+const isAsked = (job: Job, transfers: SendsTransfers): boolean =>
+  transfers.waiting.some(
+    (one) =>
+      one.storage === job.storage &&
+      one.source === job.source &&
+      one.path === job.destination,
+  );
+
+/** A path on a printer, the same whether or not it starts with a slash. */
+const onPrinter = (path: string): string => path.replace(/^\/+/, '');
+
+/**
+ * This tab's files for one printer that its page draws as its own rows,
+ * oldest first, until the transfer that moves one is listed in `moving`.
+ * An ended transfer to the same path stands for the file only once the file
+ * has landed: before then it is an earlier send of the same name.
+ */
+export const pendingSendsOf = (
+  rows: readonly SendRow[],
+  deviceId: string,
+  moving: readonly { readonly path: string; readonly state: string }[],
+): SendRow[] =>
+  rows
+    .filter(
+      (row) =>
+        row.deviceId === deviceId &&
+        row.id.startsWith('job:') &&
+        (row.step === 'uploading' ||
+          row.step === 'waiting' ||
+          row.step === 'asking' ||
+          !moving.some(
+            (one) =>
+              onPrinter(one.path) === onPrinter(row.path) &&
+              (TRANSFER_RUNNING.includes(one.state) || row.progress === 1),
+          )),
+    )
+    .reverse();
+
+/**
+ * The files of one drop in the order they go to the printer, each with
+ * whether it is printed: the one at `print` goes first and is the only one
+ * printed, and the rest keep their order and are copied. `print` is a place
+ * among `files`, so two files of the same name stay two.
+ */
+export const printFirst = <T>(
+  files: readonly T[],
+  print: number | undefined,
+): { file: T; print: boolean }[] => {
+  const picked = print === undefined ? undefined : files[print];
+  const rest = files.filter((_, at) => at !== print);
+
+  return [
+    ...(picked === undefined ? [] : [{ file: picked, print: true }]),
+    ...rest.map((file) => ({ file, print: false })),
+  ];
+};
 
 /** A name inside a folder, where the empty folder is the storage's root. */
 const joinPath = (folder: string, name: string): string =>
@@ -155,6 +231,17 @@ export class Sends {
   // draws it.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   readonly #aborts = new Map<number, AbortController>();
+  // The last send to each printer, by printer. A Buddy board fetches one file
+  // at a time and refuses a second as busy, so the sends to one printer go one
+  // after another. It is not reactive, because nothing draws it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  readonly #lanes = new Map<string, Promise<void>>();
+  // The place in its printer's line that a file the printer holds under its
+  // name keeps while the person is asked about it, by printer. Replacing the
+  // file goes in that place, before the files dropped after it. It is not
+  // reactive, because nothing draws it.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  readonly #held = new Map<string, { jobId: number; handOn: () => void }>();
   #next = 0;
   // Counts the resets. A chain that started before a reset records nothing.
   #resets = 0;
@@ -182,17 +269,27 @@ export class Sends {
     const own = this.#jobs.map((job): SendRow => {
       const relay = job.step === 'sending' ? this.#transferOf(job) : undefined;
       if (relay !== undefined) claimed.add(relay.transferId);
+      // Sending, and no transfer opened yet: the server is asking the printer
+      // about the name, or deleting the printer's file to replace it.
+      const opening =
+        job.step === 'sending' &&
+        relay === undefined &&
+        !this.#running.landedAt(movedOf(job));
+      const before = job.replacing === true ? 'replacing' : 'checking';
 
       return {
         id: `job:${String(job.id)}`,
         deviceId: job.deviceId,
         printerName: job.printerName,
         name: job.name,
-        step: job.step,
+        path: job.destination,
+        step: opening ? before : job.step,
         progress: this.#progressOf(job, relay),
         mine: true,
         startedBy: undefined,
-        canCancel: job.step === 'uploading' || relay?.canStop === true,
+        canCancel:
+          (job.step !== 'sending' && job.step !== 'asking') ||
+          relay?.canStop === true,
         stopping:
           relay !== undefined && this.#running.stopping(relay.transferId),
       };
@@ -205,6 +302,7 @@ export class Sends {
         deviceId: row.deviceId,
         printerName: row.printerName,
         name: nameOf(row.path),
+        path: row.path,
         step: 'sending',
         progress: this.#running.progress(row.transferId),
         mine: row.mine,
@@ -222,11 +320,12 @@ export class Sends {
   }
 
   /**
-   * True while the browser still holds a file's bytes. Closing the tab then
-   * loses the file, which is what the shell asks the person about.
+   * True while the browser still holds a file's bytes, or a file waits here
+   * for its printer. Closing the tab then loses the file, which is what the
+   * shell asks the person about.
    */
   get uploading(): boolean {
-    return this.#jobs.some((job) => job.step === 'uploading');
+    return this.#jobs.some((job) => job.step !== 'sending');
   }
 
   /**
@@ -235,11 +334,16 @@ export class Sends {
    * resolves to the outcome it ended with. A job ended by `reset()` resolves
    * to `'cancelled'`.
    *
+   * A printer fetches one file at a time, so the sends to one printer go one
+   * after another, in the order they were asked for. A file whose turn has
+   * not come is `'waiting'`, and `cancel` takes it out of the line.
+   *
    * `keep` is the folder of `storage` the file is saved in, and the empty
    * string is its root. Without it the file goes up as a temporary copy,
    * which the server deletes once the file has landed or the transfer was
    * stopped, and keeps for a while after a failed send so the printer page
-   * can send it again.
+   * can send it again. A temporary copy goes up only once its turn has come,
+   * because the server also deletes one nobody has sent for an hour.
    *
    * The same kept file already going up to the same place is not uploaded
    * again: this send waits for that upload, then sends to its own printer. A
@@ -249,6 +353,11 @@ export class Sends {
    * in one request, so the print goes on when the page is closed. A start
    * the printer refuses answers `'refused'` and hands how it ended, with the
    * printer's fault, to `onRefused`.
+   *
+   * `onItsWay` runs once this server is sending the file to the printer,
+   * with the path it lands at, which is another name when the person kept
+   * both files. It does not wait for the landing, and a send that never
+   * starts never runs it.
    */
   async send(
     file: File,
@@ -260,15 +369,18 @@ export class Sends {
       keep,
       print = false,
       onRefused,
+      onItsWay,
     }: {
       keep?: string | undefined;
       print?: boolean;
       onRefused?: (ended: PrintEnd) => void;
+      onItsWay?: ((path: string) => void) | undefined;
     } = {},
   ): Promise<SendOutcome> {
     const resets = this.#resets;
     this.#next += 1;
     const kept = keep !== undefined;
+    const queued = this.#lanes.has(deviceId) || this.#busy(deviceId);
     let job: Job = {
       id: this.#next,
       deviceId,
@@ -279,39 +391,197 @@ export class Sends {
       kept,
       destination: `${directory}/${file.name}`,
       print,
-      step: 'uploading',
+      step: queued && !kept ? 'waiting' : 'uploading',
       sent: 0,
       total: file.size,
     };
     this.#jobs = [job, ...this.#jobs];
 
+    // The place in the printer's line is taken now, so the files go to the
+    // printer in the order they were asked for and not in the order their
+    // uploads end.
+    const turn = this.#turn(job);
     const transfers = this.#transfers(deviceId);
-    const saved = kept
-      ? await this.#upload(storage, job.source, file)
-      : await this.#uploadTemporary(job, file);
-    if (resets !== this.#resets) return 'cancelled';
-    if (saved === 'cancelled' || saved === 'failed') {
-      this.#end(job.id);
-
-      return saved;
-    }
-    if (saved === undefined) {
-      // The Storage row for this key may now belong to a later upload of
-      // the same name from the Storage page, and it still reads "sending":
-      // that later upload superseded this one, which counts as a cancel and
-      // not a failure. Only a row the Storage store marked failed carries a
-      // fault.
-      const upload = this.#uploadOf(job);
-      this.#end(job.id);
-
-      return upload?.state === 'failed' ? 'failed' : 'cancelled';
+    if (kept) {
+      return this.#upAndDeliver(
+        job,
+        file,
+        transfers,
+        resets,
+        turn,
+        onRefused,
+        onItsWay,
+      );
     }
 
-    job = { ...job, source: saved.path, step: 'sending' };
+    const handOn = turn instanceof Promise ? await turn : turn;
+    if (resets !== this.#resets) {
+      handOn?.();
+
+      return 'cancelled';
+    }
+    if (handOn === undefined) {
+      this.#end(job.id);
+
+      return 'cancelled';
+    }
+    job = { ...job, step: 'uploading' };
+    this.#put(job);
+
+    return this.#upAndDeliver(
+      job,
+      file,
+      transfers,
+      resets,
+      handOn,
+      onRefused,
+      onItsWay,
+    );
+  }
+
+  // Uploads the file, waits for its turn at the printer when that has not
+  // come yet, and sends the file. The turn is handed on however it ends.
+  async #upAndDeliver(
+    uploading: Job,
+    file: File,
+    transfers: SendsTransfers,
+    resets: number,
+    turn: (() => void) | Promise<(() => void) | undefined>,
+    onRefused: ((ended: PrintEnd) => void) | undefined,
+    onItsWay: ((path: string) => void) | undefined,
+  ): Promise<SendOutcome> {
+    let handOn = turn instanceof Promise ? undefined : turn;
+    let held = false;
+    try {
+      let job = uploading;
+      const { storage, kept } = job;
+      const saved = kept
+        ? await this.#upload(storage, job.source, file)
+        : await this.#uploadTemporary(job, file);
+      if (resets !== this.#resets) return 'cancelled';
+      if (saved === 'cancelled' || saved === 'failed') {
+        this.#end(job.id);
+
+        return saved;
+      }
+      if (saved === undefined) {
+        // The Storage row for this key may now belong to a later upload of
+        // the same name from the Storage page, and it still reads "sending":
+        // that later upload superseded this one, which counts as a cancel and
+        // not a failure. Only a row the Storage store marked failed carries a
+        // fault.
+        const upload = this.#uploadOf(job);
+        this.#end(job.id);
+
+        return upload?.state === 'failed' ? 'failed' : 'cancelled';
+      }
+
+      job = { ...job, source: saved.path };
+      if (handOn === undefined && turn instanceof Promise) {
+        job = { ...job, step: 'waiting' };
+        this.#put(job);
+        handOn = await turn;
+        if (resets !== this.#resets) return 'cancelled';
+        if (handOn === undefined) {
+          this.#end(job.id);
+
+          return 'cancelled';
+        }
+      }
+
+      // A transfer somebody started while this file went up is waited for
+      // too, and the file can be cancelled meanwhile.
+      if (handOn !== undefined && this.#busy(job.deviceId)) {
+        job = { ...job, step: 'waiting' };
+        this.#put(job);
+        const free = await this.#await(job, this.#free(job.deviceId), handOn);
+        if (resets !== this.#resets) return 'cancelled';
+        if (free === undefined) {
+          this.#end(job.id);
+
+          return 'cancelled';
+        }
+      }
+
+      const outcome = await this.#deliver(
+        { ...job, step: 'sending' },
+        transfers,
+        resets,
+        onRefused,
+        onItsWay,
+      );
+      if (outcome === 'taken' && handOn !== undefined) {
+        this.#hold(job, transfers, handOn);
+        held = true;
+      }
+
+      return outcome;
+    } finally {
+      // A place the question holds is handed on by its answer. A turn that
+      // comes after the job ended is handed straight on.
+      if (!held) {
+        if (handOn !== undefined) handOn();
+        else if (turn instanceof Promise) void turn.then((late) => late?.());
+      }
+    }
+  }
+
+  // Keeps the job's place in its printer's line while the person is asked
+  // about the name the printer holds. Replacing the file takes the place
+  // through inTurn; keeping the printer's file hands it on.
+  #hold(job: Job, transfers: SendsTransfers, handOn: () => void): void {
+    const { deviceId } = job;
+    const asked = (): boolean => isAsked(job, transfers);
+    // The file stays drawn while the person is asked, in the place it had
+    // among the files of its drop, so it is never gone from the page.
+    this.#jobs = [...this.#jobs, { ...job, step: 'asking' as const }].sort(
+      (one, other) => other.id - one.id,
+    );
+    const held = { jobId: job.id, handOn };
+    this.#held.set(deviceId, held);
+    const stop = $effect.root(() => {
+      $effect(() => {
+        if (asked()) return;
+        if (this.#held.get(deviceId) === held) {
+          this.#held.delete(deviceId);
+          this.#end(job.id);
+          handOn();
+        }
+        queueMicrotask(stop);
+      });
+    });
+  }
+
+  // Sends a file that is on this server to its printer, and prints it when
+  // the job says so.
+  async #deliver(
+    job: Job,
+    transfers: SendsTransfers,
+    resets: number,
+    onRefused: ((ended: PrintEnd) => void) | undefined,
+    onItsWay: ((path: string) => void) | undefined,
+  ): Promise<SendOutcome> {
+    const { storage, deviceId } = job;
     // A landing of the same file to the same place from an earlier send is
     // not this one's.
     this.#running.awaitLanding(movedOf(job));
+    if (onItsWay !== undefined) {
+      this.#running.whenOnItsWay(
+        { deviceId, storage, source: job.source },
+        onItsWay,
+      );
+    }
     this.#put(job);
+
+    // A send that started no transfer takes its wait back, so a later send
+    // of the same file does not run it.
+    const notSent = (end: SendOutcome): SendOutcome => {
+      if (onItsWay !== undefined) {
+        this.#running.notOnItsWay({ deviceId, storage, source: job.source });
+      }
+
+      return end;
+    };
 
     if (job.print) {
       const printed = await transfers.print(
@@ -325,7 +595,7 @@ export class Sends {
       if (printed?.answer !== undefined) {
         onRefused?.(printed);
 
-        return 'refused';
+        return notSent('refused');
       }
     } else {
       const sent = await transfers.send(storage, job.source, job.destination);
@@ -336,20 +606,74 @@ export class Sends {
 
     // A name the printer holds is not a failure: the send waits in the
     // printer's store for the person's answer, and the printer page asks.
-    const asked = transfers.waiting.some(
-      (one) =>
-        one.storage === storage &&
-        one.source === job.source &&
-        one.path === job.destination,
-    );
-    if (asked) return 'taken';
+    if (isAsked(job, transfers)) return 'taken';
 
     // A transfer stopped on the printer page answers the send with an
     // error too. `sendFailure` in `internal/app/devicefiles.go` marks it
     // with the parameter `event` set to "stopped", which is not a failure.
     const stopped = transfers.error?.params.event === 'stopped';
 
-    return stopped ? 'cancelled' : 'failed';
+    return notSent(stopped ? 'cancelled' : 'failed');
+  }
+
+  /**
+   * Runs `work` once every send to the printer asked for before it has ended,
+   * and holds the printer until `work` ends. A file the printer holds under
+   * a name goes through it when the person replaces it: it takes the place
+   * its send kept while the person was asked, ahead of the files dropped
+   * after it. It answers undefined when the person cancelled it before
+   * `work` ran.
+   */
+  async inTurn<T>(
+    deviceId: string,
+    work: () => Promise<T>,
+  ): Promise<T | undefined> {
+    const held = this.#held.get(deviceId);
+    if (held !== undefined) {
+      this.#held.delete(deviceId);
+      const asking = this.#jobs.find((job) => job.id === held.jobId);
+      if (asking === undefined) {
+        try {
+          await this.#free(deviceId);
+
+          return await work();
+        } finally {
+          held.handOn();
+        }
+      }
+
+      // A replace that meets a transfer started elsewhere waits like any
+      // file, and a cancel then leaves the printer's file and hands on.
+      const waiting = { ...asking, step: 'waiting' as const };
+      this.#put(waiting);
+      const turn = await this.#await(
+        waiting,
+        this.#free(deviceId),
+        held.handOn,
+      );
+      if (turn === undefined) {
+        this.#end(held.jobId);
+
+        return undefined;
+      }
+      this.#put({ ...waiting, step: 'sending', replacing: true });
+      try {
+        return await work();
+      } finally {
+        this.#end(held.jobId);
+        turn();
+      }
+    }
+
+    const { before, handOn } = this.#queue(deviceId);
+    try {
+      await before;
+      await this.#free(deviceId);
+
+      return await work();
+    } finally {
+      handOn();
+    }
   }
 
   /**
@@ -367,6 +691,11 @@ export class Sends {
     const job = this.#jobs.find((held) => `job:${String(held.id)}` === id);
     if (job === undefined) {
       void this.#running.stop(id.slice('transfer:'.length));
+
+      return;
+    }
+    if (job.step === 'waiting') {
+      this.#aborts.get(job.id)?.abort();
 
       return;
     }
@@ -392,6 +721,8 @@ export class Sends {
     this.#flights.clear();
     for (const flight of this.#aborts.values()) flight.abort();
     this.#aborts.clear();
+    for (const held of this.#held.values()) held.handOn();
+    this.#held.clear();
   }
 
   #upload(
@@ -444,6 +775,95 @@ export class Sends {
     }
   }
 
+  // Takes the job's place in its printer's line. A free printer answers at
+  // once, so a cancel never falls between the row and its abort; otherwise
+  // it answers once every earlier send ended, or undefined when cancelled.
+  #turn(job: Job): (() => void) | Promise<(() => void) | undefined> {
+    const { before, handOn } = this.#queue(job.deviceId);
+    if (before === undefined && !this.#busy(job.deviceId)) return handOn;
+
+    const ready = (before ?? Promise.resolve()).then(() =>
+      this.#free(job.deviceId),
+    );
+
+    return this.#await(job, ready, handOn);
+  }
+
+  // Whether the server is running a transfer to the printer that this tab's
+  // line does not know of: one another tab or another person started.
+  #busy(deviceId: string): boolean {
+    return this.#running.rows.some((row) => row.deviceId === deviceId);
+  }
+
+  // Settles once the server runs no transfer to the printer, so a file waits
+  // for one started elsewhere instead of meeting it as busy. A transfer leaves
+  // the running ones on its settled frame, and a frame lost without a
+  // continuity event would hold the line for good, so the running transfers
+  // are read again every RECHECK_MS while a file waits.
+  #free(deviceId: string): Promise<void> {
+    if (!this.#busy(deviceId)) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      const recheck = setInterval(() => {
+        void this.#running.load();
+      }, RECHECK_MS);
+      const stop = $effect.root(() => {
+        $effect(() => {
+          if (this.#busy(deviceId)) return;
+          clearInterval(recheck);
+          resolve();
+          queueMicrotask(stop);
+        });
+      });
+    });
+  }
+
+  // Puts one more send at the end of the printer's line. `before` settles
+  // once every send ahead has ended, and is undefined for a free printer;
+  // `handOn` lets the next one go.
+  #queue(deviceId: string): {
+    before: Promise<void> | undefined;
+    handOn: () => void;
+  } {
+    const before = this.#lanes.get(deviceId);
+    let handOn = (): void => undefined;
+    const mine = new Promise<void>((resolve) => {
+      handOn = resolve;
+    });
+    const last = before === undefined ? mine : before.then(() => mine);
+    this.#lanes.set(deviceId, last);
+    void last.then(() => {
+      if (this.#lanes.get(deviceId) === last) this.#lanes.delete(deviceId);
+    });
+
+    return { before, handOn };
+  }
+
+  // Waits for the send before this one, or for the person to cancel this one.
+  async #await(
+    job: Job,
+    before: Promise<void>,
+    handOn: () => void,
+  ): Promise<(() => void) | undefined> {
+    const flight = new AbortController();
+    this.#aborts.set(job.id, flight);
+    const cancelled = new Promise<void>((resolve) => {
+      flight.signal.addEventListener('abort', () => {
+        resolve();
+      });
+    });
+    try {
+      await Promise.race([before, cancelled]);
+    } finally {
+      this.#aborts.delete(job.id);
+    }
+    if (!flight.signal.aborted) return handOn;
+
+    handOn();
+
+    return undefined;
+  }
+
   // The newest running transfer that moves this job's file to its printer.
   #transferOf(job: Job): RunningTransferRow | undefined {
     return runningTransferOf(this.#running.rows, {
@@ -473,6 +893,7 @@ export class Sends {
   }
 
   #progressOf(job: Job, relay: RunningTransferRow | undefined): number | null {
+    if (job.step === 'waiting' || job.step === 'asking') return null;
     if (job.step === 'uploading' && !job.kept) {
       return job.total > 0 ? Math.min(job.sent / job.total, 1) : null;
     }

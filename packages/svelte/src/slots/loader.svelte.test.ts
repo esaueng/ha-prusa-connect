@@ -276,6 +276,8 @@ describe('ModuleLoader', () => {
         spools: defineModule((host) => {
           seen = Object.keys(host).sort();
           expect(host.principal.id).toBe('user:alice');
+          expect(host.namespace).toBe('spools');
+          expect(host.self).toBe('sink:spools');
           expect(host.fleet.loaded).toBe(false);
           host.register.page('spools', PlainPage);
         }),
@@ -289,12 +291,16 @@ describe('ModuleLoader', () => {
       'client',
       'components',
       'fleet',
+      'namespace',
       'pageHref',
       'principal',
       'register',
+      'self',
+      'sendToPrinter',
       'signal',
       'store',
       't',
+      'uploadToPrinter',
     ]);
   });
 });

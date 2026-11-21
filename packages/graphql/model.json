@@ -224,6 +224,26 @@
           "name": "read_only",
           "description": "Whether the printer refuses to change this entry.",
           "type": "Boolean!"
+        },
+        {
+          "name": "estimated_seconds",
+          "description": "The print time the slicer estimated, in whole seconds, as the printer read it out of the file. It is present only on the directory of an answer about one print file, and absent for a printer or a file that names none.",
+          "type": "Int64"
+        },
+        {
+          "name": "printer_model",
+          "description": "The printer the file was sliced for, such as XL2IS. Present only on the directory of an answer about one print file that names it.",
+          "type": "String"
+        },
+        {
+          "name": "layer_height_mm",
+          "description": "The layer height the file was sliced with, in millimetres. Present only on the directory of an answer about one print file that names it.",
+          "type": "Float"
+        },
+        {
+          "name": "material",
+          "description": "The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Present only on the directory of an answer about one print file that names it.",
+          "type": "String"
         }
       ]
     },

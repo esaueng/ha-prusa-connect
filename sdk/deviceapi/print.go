@@ -34,6 +34,12 @@ type PrintParams struct {
 	Storage string `json:"storage,omitempty"`
 	Source  string `json:"source,omitempty"`
 	Path    string `json:"path"`
+
+	// KeepBoth sends the file under a free name when the printer holds
+	// another file at Path, such as usb/part[1].bgcode, and keeps the
+	// printer's file. Started.Path names the file that is printed. It needs a
+	// storage.
+	KeepBoth bool `json:"keep_both,omitempty"`
 }
 
 // Validate checks one print request against the limits of this contract. The
@@ -63,6 +69,8 @@ func (p PrintParams) Validate() error {
 		return fmt.Errorf("%w: the call names a storage and no path inside it", ErrInvalidQuery)
 	case p.Storage == "" && p.Source != "":
 		return fmt.Errorf("%w: the call names a path inside no storage", ErrInvalidQuery)
+	case p.Storage == "" && p.KeepBoth:
+		return fmt.Errorf("%w: keep_both sends a file from a storage and the call names none", ErrInvalidQuery)
 	}
 
 	return nil
@@ -76,6 +84,11 @@ func (p PrintParams) Validate() error {
 type Started struct {
 	TransferID string `json:"transfer_id,omitempty"`
 	CommandID  string `json:"command_id,omitempty"`
+
+	// Path is the file on the printer that is printed. With KeepBoth it may
+	// be a numbered name and not the path asked for. A host older than
+	// KeepBoth leaves it empty.
+	Path string `json:"path,omitempty"`
 }
 
 // Print sends a file from one of the server's storages to a printer and

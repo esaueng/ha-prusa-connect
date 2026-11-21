@@ -1658,6 +1658,14 @@ const VerbFileUpload Capability = CorePrefix + "feature.file_upload"
 
 VerbFileUpload is the capability a device declares when it can be sent a file. It is a feature, not a command. A driver maps it to its own protocol.
 
+#### `VerbSetPrinterReady` {#connectorapi-verbsetprinterready}
+
+```go
+const VerbSetPrinterReady Capability = CorePrefix + "command.set_printer_ready"
+```
+
+VerbSetPrinterReady is the command that makes a device ready for its next job. A state a transition of this verb leads to is the device's ready state.
+
 #### `ArgumentKey` {#connectorapi-argumentkey}
 
 ```go
@@ -2105,6 +2113,19 @@ type File struct {
     // Fill it only on Listing.Directory, when the listing is of that one file,
     // never on Entries. The bytes are untrusted, and the host checks them.
     Preview []byte `json:"preview,omitempty"`
+    // EstimatedSeconds is the print time the slicer estimated for a print
+    // file, in whole seconds, as the device read it out of the file. Like
+    // Preview it is filled only on Listing.Directory, when the listing is of
+    // the one file. Zero is a device or a file that names none.
+    EstimatedSeconds int64 `json:"estimated_seconds,omitempty"`
+    // PrinterModel, LayerHeightMM and Material are what the slicer wrote
+    // about the print: the printer it sliced for, such as XL2IS, the layer
+    // height in millimetres, and the material, one for each tool joined by
+    // a semicolon. Like Preview they are filled only on Listing.Directory.
+    // Empty or zero is a device or a file that names none.
+    PrinterModel  string  `json:"printer_model,omitempty"`
+    LayerHeightMM float64 `json:"layer_height_mm,omitempty"`
+    Material      string  `json:"material,omitempty"`
 }
 ```
 

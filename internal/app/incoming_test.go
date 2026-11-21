@@ -116,7 +116,7 @@ func TestASendThatEndedIsToldFromOneToTryAgain(t *testing.T) {
 	require.True(t, sendSettled(errHeldSame), "a printer that held the same file")
 	require.True(t, sendSettled(stopped), "a transfer a person stopped")
 	require.False(t, sendSettled(failed), "a transfer that failed")
-	require.False(t, sendSettled(nameTaken("printer", "usb/part.gcode")), "a name the printer holds")
+	require.False(t, sendSettled(nameTaken("printer", "usb/part.gcode", false)), "a name the printer holds")
 	require.False(t, sendSettled(errors.New("the printer went away")), "any other failure")
 }
 

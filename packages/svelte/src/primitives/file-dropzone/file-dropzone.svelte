@@ -137,13 +137,16 @@
   ondragleave={dragLeave}
   ondrop={drop}
   class={[
-    'rounded-sm border border-dashed border-border transition-colors',
+    'rounded-md border border-dashed border-border transition-colors',
+    // A compact zone in a narrow box centres its line, and the button under
+    // it takes the whole width; from 24rem up the button sits at the line's
+    // end.
     compact
-      ? 'flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2'
+      ? '@container/dropzone flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-3 py-2'
       : 'flex flex-col items-center gap-4 p-6 text-center',
-    'data-[state=dragging-over]:border-primary data-[state=dragging-over]:bg-accent',
-    'data-[state=rejected]:border-destructive',
-    'data-[state=disabled]:border-disabled-foreground',
+    'state-dragging-over:border-primary state-dragging-over:bg-accent',
+    'state-rejected:border-destructive',
+    'state-disabled:border-disabled-foreground',
     className,
   ]}
 >
@@ -151,7 +154,14 @@
     aria-hidden="true"
     class={['text-muted-foreground', compact ? 'size-4 shrink-0' : 'size-8']}
   />
-  <p class="text-sm text-muted-foreground">{invitation}</p>
+  <p
+    class={[
+      'text-sm text-muted-foreground',
+      compact && 'text-center @sm/dropzone:text-start',
+    ]}
+  >
+    {invitation}
+  </p>
   <label for={inputId} class="sr-only">{inputLabel}</label>
   <input
     bind:this={input}
@@ -169,7 +179,9 @@
     variant="secondary"
     size={compact ? 'sm' : 'md'}
     {disabled}
-    class={compact ? 'ml-auto shrink-0' : undefined}
+    class={compact
+      ? 'w-full shrink-0 @sm/dropzone:ms-auto @sm/dropzone:w-auto'
+      : undefined}
     onclick={() => input?.click()}
   >
     {chooseWords}
@@ -178,6 +190,7 @@
     <p class="text-xs text-muted-foreground">{acceptedLine}</p>
   {/if}
   {#if refused.length > 0}
+    <!-- eslint-disable-next-line no-restricted-syntax -- the dropzone announces the files it refused in place; its test queries them by role -->
     <p role="alert" class="text-sm text-destructive-text">{refusedLine}</p>
   {/if}
 </div>

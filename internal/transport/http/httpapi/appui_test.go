@@ -21,7 +21,7 @@ func appFixture(t *testing.T) http.Handler {
 
 	return serverWithMounts(t, Mount{
 		Pattern: rootCatchAll,
-		Handler: AppHandler(files),
+		Handler: AppHandler(files, AppOptions{}),
 		Reason:  appMountReason,
 	}).Handler()
 }

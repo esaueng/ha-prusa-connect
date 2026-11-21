@@ -222,6 +222,8 @@ export const stubHost = (
     t: translateFor(NAMESPACE),
     // A test never ends the module's time on the page, so nothing aborts it.
     signal: new AbortController().signal,
+    namespace: NAMESPACE,
+    self: 'sink:test',
     pageHref: (path) => modulePageHref(NAMESPACE, path),
     // This module draws no other module's component.
     components: noComponents,

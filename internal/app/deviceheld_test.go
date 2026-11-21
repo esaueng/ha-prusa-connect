@@ -17,6 +17,7 @@ import (
 	"github.com/prusa3d/prusa-connect/internal/printer/capability"
 	"github.com/prusa3d/prusa-connect/internal/printer/profile"
 	"github.com/prusa3d/prusa-connect/internal/transport/http/httpapi"
+	"github.com/prusa3d/prusa-connect/internal/transport/http/httpfault"
 	"github.com/prusa3d/prusa-connect/sdk/connectorapi"
 	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/fault"
@@ -306,6 +307,148 @@ func TestAFileOnThePrinterIsReplacedOnlyWhenAskedByAnOperator(t *testing.T) {
 	require.True(t, isNameTaken(err), "a plain send reused the printer's copy: %v", err)
 }
 
+// keep_both sends beside the printer's file under the next free number and
+// deletes nothing, and the transfer names where the file landed.
+func TestKeepBothSendsUnderTheNextFreeName(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+	upload := httpapi.DeviceUpload{Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode", KeepBoth: true}
+
+	first, err := rig.plane.Send(t.Context(), rig.owner, rig.id, upload)
+	require.NoError(t, err)
+	require.Equal(t, "usb/part[1].gcode", first.Path)
+
+	second, err := rig.plane.Send(t.Context(), rig.owner, rig.id, upload)
+	require.NoError(t, err)
+	require.Equal(t, "usb/part[2].gcode", second.Path)
+
+	require.Equal(t, []string{"usb/part[1].gcode", "usb/part[2].gcode"}, rig.session.sends())
+	require.Empty(t, rig.session.deletes(), "keep_both deleted the printer's file")
+
+	// A free name is sent where it was asked for.
+	fresh := upload
+	fresh.Path = "usb/new.gcode"
+	landed, err := rig.plane.Send(t.Context(), rig.owner, rig.id, fresh)
+	require.NoError(t, err)
+	require.Equal(t, "usb/new.gcode", landed.Path)
+}
+
+// A print with keep_both starts the file it sent under the free name, never
+// the printer's own file of the first name.
+func TestKeepBothPrintStartsTheFileItSent(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+	request := partPrint()
+	request.KeepBoth = true
+
+	result, err := rig.plane.Print(t.Context(), rig.owner, rig.id, request)
+	require.NoError(t, err)
+	require.Equal(t, "usb/part[1].gcode", result.Path)
+	require.NotNil(t, result.Transfer)
+
+	commands := rig.session.given()
+	require.NotEmpty(t, commands)
+	require.Equal(t, "usb/part[1].gcode", commands[len(commands)-1].Args[httpapi.StartPrintPathArgument])
+}
+
+// Both answers to a held name at once is refused before anything is asked.
+func TestKeepBothAndReplaceTogetherAreRefused(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+
+	_, err := rig.plane.Send(t.Context(), rig.owner, rig.id, httpapi.DeviceUpload{
+		Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode", Replace: true, KeepBoth: true,
+	})
+	require.Truef(t, fault.HasCode(err, httpfault.CodeRequestInvalid()), "the send answered %v", err)
+
+	both := partPrint()
+	both.Replace, both.KeepBoth = true, true
+
+	_, err = rig.plane.Print(t.Context(), rig.owner, rig.id, both)
+	require.Truef(t, fault.HasCode(err, httpfault.CodeRequestInvalid()), "the print answered %v", err)
+
+	require.Empty(t, rig.session.sends())
+	require.Empty(t, rig.session.deletes())
+}
+
+// A printer that holds every numbered name refuses the send as a taken name
+// and is sent nothing.
+func TestKeepBothWithEveryNumberTakenIsNameTaken(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+
+	rig.session.mu.Lock()
+	for n := 1; n <= freeNameTries; n++ {
+		at := numberedName("usb/part.gcode", n)
+		rig.session.files[at] = connectorapi.File{Path: at}
+	}
+	rig.session.mu.Unlock()
+
+	_, err := rig.plane.Send(t.Context(), rig.owner, rig.id, httpapi.DeviceUpload{
+		Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode", KeepBoth: true,
+	})
+	require.Truef(t, isNameTaken(err), "the send answered %v, want FILE_NAME_TAKEN", err)
+	require.Empty(t, rig.session.sends())
+}
+
+func TestNumberedNameKeepsTheExtension(t *testing.T) {
+	t.Parallel()
+
+	for at, want := range map[string]string{
+		"usb/part.gcode":      "usb/part[3].gcode",
+		"usb/a.b/cube.bgcode": "usb/a.b/cube[3].bgcode",
+		"usb/part.GCODE.gz":   "usb/part[3].GCODE.gz",
+		"usb/noextension":     "usb/noextension[3]",
+		"usb/dir/x.y.z.gcode": "usb/dir/x.y.z[3].gcode",
+	} {
+		require.Equal(t, want, numberedName(at, 3), at)
+	}
+}
+
+// A file the printer lists read-only is one it refuses to delete, so the
+// refusal says so and the page asks without offering a replace.
+func TestANameTakenByAReadOnlyFileSaysSo(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+	upload := httpapi.DeviceUpload{Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode"}
+
+	_, err := rig.plane.Send(t.Context(), rig.owner, rig.id, upload)
+	require.Falsef(t, readOnlyParam(t, err), "a writable file was said to be read-only: %v", err)
+
+	rig.session.mu.Lock()
+	held := rig.session.files["usb/part.gcode"]
+	held.ReadOnly = true
+	rig.session.files["usb/part.gcode"] = held
+	rig.session.mu.Unlock()
+
+	_, err = rig.plane.Send(t.Context(), rig.owner, rig.id, upload)
+	require.Truef(t, readOnlyParam(t, err), "a read-only file was not said to be: %v", err)
+}
+
+// readOnlyParam is the read_only param of a FILE_NAME_TAKEN, false when it
+// carries none.
+func readOnlyParam(t *testing.T, err error) bool {
+	t.Helper()
+
+	require.Truef(t, isNameTaken(err), "answered %v, want FILE_NAME_TAKEN", err)
+
+	carried, ok := errors.AsType[*fault.Fault](err)
+	require.True(t, ok)
+
+	for _, param := range carried.Params() {
+		if param.Key == "read_only" {
+			return param.Value.String() == "true"
+		}
+	}
+
+	return false
+}
+
 // A replace confirmed while the printer is already fetching another file is
 // refused as busy, and the printer's file is still there afterwards.
 func TestAReplaceRefusedAsBusyKeepsThePrintersFile(t *testing.T) {
@@ -520,6 +663,29 @@ func TestAModulePrintOntoAHeldNameIsNameTaken(t *testing.T) {
 		ID: rig.id, Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode",
 	})
 	require.ErrorIs(t, err, deviceapi.ErrNameTaken)
+}
+
+// A module that says keep_both is answered the free name its file is printed
+// from, and the printer's own file stays.
+func TestAModulePrintWithKeepBothAnswersTheFreeName(t *testing.T) {
+	t.Parallel()
+
+	rig := newStickRig(t)
+	require.NoError(t, rig.plane.graph.Write(t.Context(),
+		tuple(t, authz.TypeDevice, rig.id, authz.RelOperator, printingModule)))
+	require.NoError(t, rig.plane.graph.Write(t.Context(),
+		tuple(t, authz.TypeResourceKind, "storage", authz.RelViewer, printingModule)))
+
+	fleet := modulePrinting(t, rig.plane.graph, rig.plane,
+		authz.ActionObserve, authz.ActionOperate, authz.ActionReadStorage)
+
+	started, err := fleet.Print(t.Context(), deviceapi.PrintParams{
+		ID: rig.id, Storage: "bench", Source: "part.gcode", Path: "usb/part.gcode", KeepBoth: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "usb/part[1].gcode", started.Path)
+	require.NotEmpty(t, started.TransferID)
+	require.Empty(t, rig.session.deletes(), "keep_both deleted the printer's file")
 }
 
 // A module that prints the same file of its print folder again starts the copy

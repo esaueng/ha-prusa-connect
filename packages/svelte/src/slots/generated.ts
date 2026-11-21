@@ -38,6 +38,8 @@ export const SLOT_NAMES = [
   'file-tab',
   'camera-section',
   'camera-view',
+  'device-file-action',
+  'device-upload-action',
 ] as const;
 export type SlotName = (typeof SLOT_NAMES)[number];
 export type Screen =
@@ -58,7 +60,11 @@ export type SectionSlot =
   | 'file-tab'
   | 'camera-section'
   | 'camera-view';
-export type ActionSlot = 'device-action' | 'file-action';
+export type ActionSlot =
+  | 'device-action'
+  | 'file-action'
+  | 'device-file-action'
+  | 'device-upload-action';
 
 export const SLOT_KEYS = {
   settings: 'settings',
@@ -72,6 +78,8 @@ export const SLOT_KEYS = {
   'camera-view': 'camera_view',
   'device-action': 'device_action',
   'file-action': 'file_action',
+  'device-file-action': 'device_file_action',
+  'device-upload-action': 'device_upload_action',
 } as const satisfies Record<SectionSlot | ActionSlot, keyof ModuleContributes>;
 
 export const SLOT_SCREENS = {
@@ -89,6 +97,8 @@ export const SLOT_SCREENS = {
   'file-tab': 'storage',
   'camera-section': 'printer-detail',
   'camera-view': 'printer-detail',
+  'device-file-action': 'printer-detail',
+  'device-upload-action': 'printer-detail',
 } as const satisfies Record<SlotName, Screen>;
 
 export const SLOT_FORMS = {
@@ -106,6 +116,8 @@ export const SLOT_FORMS = {
   'file-tab': 'section',
   'camera-section': 'section',
   'camera-view': 'section',
+  'device-file-action': 'action',
+  'device-upload-action': 'action',
 } as const satisfies Record<
   SlotName,
   'page' | 'section' | 'action' | 'card' | 'derived'
@@ -130,6 +142,8 @@ export interface SectionProps {
 export interface ActionRuns {
   'device-action': (deviceId: string) => Promise<void>;
   'file-action': (fileRef: string) => Promise<void>;
+  'device-file-action': (printerFileRef: string) => Promise<void>;
+  'device-upload-action': (printerFileRef: string) => Promise<void>;
 }
 
 export type SectionOutletTarget =
@@ -145,7 +159,9 @@ export type SectionOutletTarget =
 
 export type ActionOutletTarget =
   | { name: 'device-action'; deviceId: string }
-  | { name: 'file-action'; fileRef: string };
+  | { name: 'file-action'; fileRef: string }
+  | { name: 'device-file-action'; printerFileRef: string }
+  | { name: 'device-upload-action'; printerFileRef: string };
 
 export interface RegisterHandlers {
   page(path: string, component: Component): void;
@@ -210,6 +226,10 @@ export interface ModuleRegister {
     id: string,
     component: Component<SectionProps['camera-view']>,
   ): void;
+  /** An item in the action menu of each file on a printer's Files tab. A folder has none. */
+  deviceFileAction(id: string, run: ActionRuns['device-file-action']): void;
+  /** A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way. */
+  deviceUploadAction(id: string, run: ActionRuns['device-upload-action']): void;
   /** Hands a component to other modules' bundles, under a name ui.exports in the manifest names. */
   component(name: string, component: Component<never>): void;
 }
@@ -253,6 +273,12 @@ export const buildRegister = (handlers: RegisterHandlers): ModuleRegister => ({
   },
   cameraView: (id, component) => {
     handlers.section('camera-view', id, component);
+  },
+  deviceFileAction: (id, run) => {
+    handlers.action('device-file-action', id, run);
+  },
+  deviceUploadAction: (id, run) => {
+    handlers.action('device-upload-action', id, run);
   },
   component: (name, component) => {
     handlers.component?.(name, component);

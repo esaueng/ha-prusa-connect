@@ -2,7 +2,12 @@
 import {
   BED_PATH,
   BED_TARGET_PATH,
+  CHAMBER_PATH,
+  CHAMBER_TARGET_PATH,
   activeMaterialOf,
+  activeToolOf,
+  materialOf,
+  toolPath,
   currentHeadOf,
   nozzlePath,
   nozzleTargetPath,
@@ -11,6 +16,7 @@ import {
   PRINTER_STATE_TONE,
   printerStateOf,
   toolsOf,
+  reportedToolIds,
   STATE_PATH,
   textAt,
   type PrinterSeverityTier,
@@ -19,7 +25,7 @@ import {
 } from '../../domain';
 import type { DeviceIssueEntry } from '../../data';
 import type { Device } from '../../domain/command';
-import { t } from '../../i18n';
+import { formatDuration, formatNumber, t } from '../../i18n';
 import { mayRemove } from '../printer-detail/info/permission';
 import {
   PRINTER_MODELS,
@@ -45,6 +51,20 @@ export const printerHref = (id: string, tab?: string): string => {
 const SNAPSHOT_ONLY = { value: (): undefined => undefined };
 
 /**
+ * The tool a printer with a single one uses: `0` when it names no tools at
+ * all, none when that one tool sits behind a feeder with slots.
+ */
+const singleToolOf = (
+  device: Device,
+  ids: readonly string[],
+): string | undefined => {
+  if (ids.length === 0 && device.tools === undefined) return '0';
+  const [onlyId] = ids;
+  if (ids.length !== 1 || onlyId === undefined) return undefined;
+  return device.tools?.tools[onlyId]?.feeder?.slot_count ? undefined : onlyId;
+};
+
+/**
  * A disconnected machine reports nothing, so its state is read as OFFLINE
  * rather than as the last thing it said before the socket closed.
  */
@@ -60,6 +80,23 @@ export const printerRowOf = (
   const entry = issue === undefined ? undefined : issueOf?.(issue.reason);
 
   const progress = device.job?.progress;
+  const jobRunning = device.job?.running;
+  const remainingMs = device.job?.time_remaining_ms;
+  const activeTool = activeToolOf(SNAPSHOT_ONLY, device);
+  const ids =
+    device.tools === undefined
+      ? reportedToolIds(device.state)
+      : Object.keys(device.tools.tools);
+  const candidate = activeTool ?? singleToolOf(device, ids);
+  const filamentTool =
+    candidate !== undefined &&
+    device.connected &&
+    device.tools?.tools[candidate] !== null &&
+    device.state[toolPath(candidate, 'enabled')] !== false &&
+    !device.tools?.tools[candidate]?.feeder?.slot_count &&
+    materialOf(SNAPSHOT_ONLY, device, candidate) !== ''
+      ? candidate
+      : undefined;
   // A print the fleet store invented from a telemetry frame carries an empty
   // name until the record arrives. Empty is no name, as `textAt` reads it.
   const jobName = device.job?.display_name;
@@ -71,6 +108,16 @@ export const printerRowOf = (
     artwork: printerArtworkOf(device),
     state,
     tier: PRINTER_STATE_SEVERITY_TIER[state],
+    jobRunning,
+    remaining:
+      jobRunning === true &&
+      printActivityOf({ state, jobRunning }) === 'active' &&
+      typeof remainingMs === 'number' &&
+      Number.isFinite(remainingMs) &&
+      remainingMs > 0
+        ? Math.round(remainingMs / 1000)
+        : undefined,
+    filamentTool,
     jobName: jobName === '' ? undefined : jobName,
     progress: typeof progress === 'number' ? Math.round(progress) : null,
     // The head printing now, else head 0: the tree is the only place a
@@ -82,6 +129,8 @@ export const printerRowOf = (
     ),
     bed: numberAt(device, BED_PATH),
     bedTarget: numberAt(device, BED_TARGET_PATH),
+    chamber: numberAt(device, CHAMBER_PATH),
+    chamberTarget: numberAt(device, CHAMBER_TARGET_PATH),
     // One material for the row: the one the printer prints with now.
     material: activeMaterialOf(SNAPSHOT_ONLY, device),
     statusNote: entry?.summary ?? issue?.detail,
@@ -150,11 +199,17 @@ export const printerArtworkOf = (device: Device): PrinterModel => {
 
 const STATE_BADGE_VARIANT: Record<PrinterStateTone, BadgeVariant> = {
   active: 'stateActive',
+  busy: 'stateBusy',
+  moving: 'stateMoving',
+  ready: 'stateReady',
+  finished: 'stateFinished',
+  stopped: 'stateStopped',
+  paused: 'statePaused',
   attention: 'stateAttention',
-  done: 'stateDone',
   fault: 'stateFault',
   idle: 'stateIdle',
   quiet: 'stateQuiet',
+  offline: 'stateOffline',
 };
 
 /** The badge a state wears, through the tint the domain already gives it. */
@@ -209,4 +264,69 @@ export const retiredReasonOf = (reason: string): string => {
   const key = RETIRED_REASON_KEY[reason];
 
   return key === undefined ? reason : t(key);
+};
+
+export const formatRemainingCompact = (seconds: number): string => {
+  if (seconds < 60) return formatDuration(seconds);
+  const minutes = Math.floor(seconds / 60);
+
+  return minutes >= 60
+    ? t('dashboard.printer.remainingHoursCompact', {
+        hours: formatNumber(Math.floor(minutes / 60)),
+        minutes: formatNumber(minutes % 60),
+      })
+    : t('dashboard.printer.remainingMinutesCompact', {
+        minutes: formatNumber(minutes),
+      });
+};
+
+/** Whether the available readings establish an active print. */
+export const printActivityOf = (
+  row: Pick<PrinterRow, 'state' | 'jobRunning'>,
+): 'active' | 'inactive' | 'unknown' => {
+  if (row.state === 'OFFLINE' || row.state === 'UNKNOWN') return 'unknown';
+  if (['IDLE', 'READY', 'FINISHED', 'STOPPED'].includes(row.state))
+    return 'inactive';
+  if (row.state === 'ERROR')
+    return row.jobRunning === false ? 'inactive' : 'unknown';
+  if (
+    row.state === 'PRINTING' ||
+    row.state === 'PAUSED' ||
+    row.jobRunning === true
+  )
+    return 'active';
+  return row.jobRunning === false ? 'inactive' : 'unknown';
+};
+
+/** The missing-name text, without guessing the machine's current activity. */
+export const jobFallbackOf = (
+  row: Pick<PrinterRow, 'state' | 'jobRunning'>,
+): string | undefined => {
+  if (row.state === 'OFFLINE' || row.state === 'UNKNOWN')
+    return t('printers.printStatusUnavailable');
+  if (
+    ['ATTENTION', 'BUSY', 'MANIPULATING'].includes(row.state) &&
+    row.jobRunning !== true
+  )
+    return undefined;
+  const activity = printActivityOf(row);
+  if (activity === 'inactive') return t('printers.noJob');
+  if (activity === 'unknown') return t('printers.printStatusUnavailable');
+  return row.jobRunning === true
+    ? t('printers.jobNameUnavailable')
+    : t('printers.jobDetailsUnavailable');
+};
+
+/**
+ * The rows in the order `ids` gives, the rows it does not name after them in
+ * the order they came. A row `ids` names but the page no longer holds is gone.
+ */
+export const inHeldOrder = <Row extends { id: string }>(
+  rows: readonly Row[],
+  ids: readonly string[],
+): Row[] => {
+  const at = new Map(ids.map((id, index) => [id, index]));
+  return [...rows].sort(
+    (a, b) => (at.get(a.id) ?? ids.length) - (at.get(b.id) ?? ids.length),
+  );
 };

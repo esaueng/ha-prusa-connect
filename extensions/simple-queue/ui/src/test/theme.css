@@ -1,0 +1,16 @@
+/* The theme, compiled for the tests alone.
+
+   The bundle this module ships carries no theme: the host page owns it and
+   `src/styles.css` only emits the utilities this page names. A test renders
+   the page with no host around it, so the variables those utilities read
+   would resolve to nothing and every box would be the wrong size.
+
+   This file is what a host page gives the bundle. It emits Tailwind's own
+   theme, the library's tokens, and the utilities this module's markup names,
+   so a box measured in a test is the box a person sees. */
+@import 'tailwindcss' source(none);
+@source '../';
+/* The library's own components, which the host page compiles for them. A
+   dialog drawn without them has no position and opens below the frame. */
+@source '../../node_modules/@prusa/connect-ui/src/primitives';
+@import '@prusa/connect-ui/tokens.css';

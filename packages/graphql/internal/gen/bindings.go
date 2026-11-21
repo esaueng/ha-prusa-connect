@@ -315,7 +315,10 @@ var objects = []objectBinding{
 	},
 	{
 		Schema: "DeviceFile",
-		Served: []string{"path", "name", "display_name", "folder", "size", "modified", "read_only"},
+		Served: []string{
+			"path", "name", "display_name", "folder", "size", "modified", "read_only", "estimated_seconds",
+			"printer_model", "layer_height_mm", "material",
+		},
 	},
 	{
 		Schema: "DeviceStorages",

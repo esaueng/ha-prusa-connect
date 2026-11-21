@@ -11,7 +11,8 @@
   The whole face links to the printer's own page. The layout follows the size
   of the box it sits in (frontend-css.md, container queries): the drawing
   shows once there is room beside the name, and the heaters fold under each
-  other in a narrow tile.
+  other in a narrow tile. In a tile of many printers the heaters and the
+  material go last, under the print.
 -->
 <script lang="ts">
   import { formatDate, formatDuration, formatUnit } from '../../../i18n';
@@ -21,6 +22,7 @@
   } from '../../../domain';
   import {
     Badge,
+    ChamberIcon,
     HeatbedIcon,
     NozzleIcon,
     PrinterIcon,
@@ -30,6 +32,8 @@
 
   import type { PrinterView } from '../printers';
   import {
+    formatRemainingCompact,
+    jobFallbackOf,
     SEVERITY_LABEL_KEY,
     severityBadgeVariant,
     stateBadgeVariant,
@@ -78,6 +82,9 @@
   const remainingText = $derived(
     view.remaining === undefined ? '' : formatDuration(view.remaining),
   );
+  const remainingCompact = $derived(
+    view.remaining === undefined ? '' : formatRemainingCompact(view.remaining),
+  );
   // When the print ends, as a time of day. The clock moves it, so a wall
   // that stays open for hours keeps a true answer.
   const endsAt = $derived(
@@ -87,8 +94,10 @@
           timeStyle: 'short',
         }),
   );
+  // Only a printer with a chamber gets its box, so an MK4 shows no dash.
+  const showsChamber = $derived(shows('chamber') && view.chamber !== undefined);
   const showsHeat = $derived(
-    shows('nozzle') || shows('bed') || shows('material'),
+    shows('nozzle') || shows('bed') || showsChamber || shows('material'),
   );
 
   // The clock moves the time of day the print ends. One timer serves every
@@ -102,6 +111,10 @@
 
 {#snippet bedIcon()}
   <HeatbedIcon aria-hidden="true" class="me-1" />
+{/snippet}
+
+{#snippet chamberIcon()}
+  <ChamberIcon aria-hidden="true" class="me-1" />
 {/snippet}
 
 <a
@@ -134,7 +147,10 @@
       />
     {/if}
     <div class="flex min-w-0 flex-1 flex-col gap-1">
-      <div class="flex items-center justify-between gap-2">
+      <div
+        data-dense={dense || undefined}
+        class="model-state flex items-center justify-between gap-2"
+      >
         <p class="min-w-0 truncate text-xs text-muted-foreground">
           {view.model === view.name ? '' : view.model}
         </p>
@@ -149,9 +165,12 @@
         {/if}
       </div>
       <p
+        data-dense={dense || undefined}
         class={[
-          'truncate font-bold',
-          dense ? 'text-sm' : 'text-base @xs/face:text-lg',
+          'face-name truncate',
+          dense
+            ? 'text-sm font-semibold'
+            : 'text-base font-bold @xs/face:text-lg',
         ]}
         title={view.name}
       >
@@ -161,13 +180,22 @@
   </div>
 
   {#if shows('job') || shows('progress')}
-    <div class="flex flex-col gap-1">
+    <div
+      class={[
+        'flex flex-col gap-1',
+        dense && 'order-2',
+        dense &&
+          (shows('remaining') && view.remaining !== undefined
+            ? 'mbs-0'
+            : 'mbs-auto'),
+      ]}
+    >
       <div
         class="flex items-baseline justify-between gap-3 font-mono text-xs text-muted-foreground"
       >
         {#if shows('job')}
           <span class="min-w-0 truncate" title={view.jobName}>
-            {view.jobName ?? t('printers.noJob')}
+            {view.jobName ?? jobFallbackOf(view)}
           </span>
         {:else}
           <span></span>
@@ -187,20 +215,54 @@
   {#if shows('remaining') && view.remaining !== undefined}
     <p
       data-part="printer-remaining"
-      class="flex flex-wrap items-baseline gap-x-2 text-sm tabular-nums"
+      class={[
+        'flex items-baseline tabular-nums',
+        dense
+          ? 'order-1 mbs-auto flex-nowrap justify-between gap-2 text-xs'
+          : 'flex-wrap gap-x-2 text-sm',
+      ]}
     >
-      <span class="font-semibold">
-        {t('dashboard.printer.left', { time: remainingText })}
+      <span
+        class={['font-semibold', dense && 'block min-w-0 truncate']}
+        title={t('dashboard.printer.left', { time: remainingText })}
+      >
+        {#if dense}<span class="inline">{remainingCompact}</span>{/if}
+        <span class={[dense && 'hidden']}
+          >{t('dashboard.printer.left', { time: remainingText })}</span
+        >
       </span>
-      <span class="text-xs text-muted-foreground">
-        {t('dashboard.printer.endsAt', { time: endsAt })}
+      <span
+        class={[
+          'text-xs text-muted-foreground',
+          dense && 'block min-w-0 truncate',
+        ]}
+        title={t('dashboard.printer.endsAt', { time: endsAt })}
+      >
+        {#if dense}<span class="inline"
+            >{t('dashboard.printer.endsAtCompact', { time: endsAt })}</span
+          >{/if}
+        <span class={[dense && 'hidden']}
+          >{t('dashboard.printer.endsAt', { time: endsAt })}</span
+        >
       </span>
     </p>
   {/if}
 
-  {#if showsHeat && !dense}
+  {#if showsHeat}
+    <!-- In a tile of many the boxes go last, under the print. -->
     <dl
-      class="mbs-auto grid grid-cols-1 gap-2 font-mono text-xs @3xs/face:grid-cols-3"
+      class={[
+        'grid gap-2 font-mono text-xs',
+        // A tile of many is narrow, and a box per line would make each
+        // printer tall, so its boxes go two by two from the start. Four in a
+        // row are too narrow for a reading and its target until the face is
+        // wide.
+        dense ? 'grid-cols-2' : 'grid-cols-1',
+        showsChamber
+          ? '@3xs/face:grid-cols-2 @md/face:grid-cols-4'
+          : '@3xs/face:grid-cols-3',
+        dense ? 'order-3' : 'mbs-auto',
+      ]}
     >
       {#if shows('nozzle')}
         <div class={BOX}>
@@ -224,6 +286,20 @@
               current={view.bed}
               target={view.bedTarget}
               muted={offline}
+            />
+          </dd>
+        </div>
+      {/if}
+      {#if showsChamber}
+        <div class={BOX}>
+          <dt class="sr-only">{t('dashboard.printer.chamber')}</dt>
+          <dd class={VALUE}>
+            <TemperatureReading
+              icon={chamberIcon}
+              current={view.chamber}
+              target={view.chamberTarget}
+              muted={offline}
+              chamber
             />
           </dd>
         </div>
@@ -254,3 +330,22 @@
     </p>
   {/if}
 </a>
+
+<style>
+  @container face (width < 10rem) {
+    .model-state[data-dense] {
+      flex-direction: column;
+      align-items: start;
+      gap: var(--spacing);
+    }
+
+    .face-name[data-dense] {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+  }
+</style>

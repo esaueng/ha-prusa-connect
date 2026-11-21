@@ -61,7 +61,7 @@ func compressedFixture(t *testing.T) http.Handler {
 
 	return serverWithMounts(t, Mount{
 		Pattern: rootCatchAll,
-		Handler: AppHandler(compressedBundle(t)),
+		Handler: AppHandler(compressedBundle(t), AppOptions{}),
 		Reason:  appMountReason,
 	}).Handler()
 }
@@ -229,7 +229,7 @@ func TestAHeadRequestGetsTheHeadersWithoutTheBody(t *testing.T) {
 
 	for name, handler := range map[string]http.Handler{
 		"the server":  compressedFixture(t),
-		"the handler": AppHandler(compressedBundle(t)),
+		"the handler": AppHandler(compressedBundle(t), AppOptions{}),
 	} {
 		for _, accept := range []string{"gzip", ""} {
 			header := http.Header{"Accept-Encoding": {accept}}
@@ -266,7 +266,7 @@ func TestABundleStoredCompressedIsABuiltApp(t *testing.T) {
 	files, carried := appBundleFS(fstest.MapFS{"dist/index.html.gz": {Data: gzipFixture(t, "index.html")}}, "dist")
 	require.True(t, carried, "a bundle with a compressed entry document was taken for an empty one")
 
-	rec := get(t, AppHandler(files), http.MethodGet, "/", http.Header{"Accept-Encoding": {"gzip"}})
+	rec := get(t, AppHandler(files, AppOptions{}), http.MethodGet, "/", http.Header{"Accept-Encoding": {"gzip"}})
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, string(readFixture(t, "testdata/appbundle/index.html")), gunzip(t, rec.Body.Bytes()))
 }
@@ -334,7 +334,7 @@ func TestDecompressionIsBoundedAndGzipIsNot(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		handler := AppHandler(compressedBundle(t))
+		handler := AppHandler(compressedBundle(t), AppOptions{})
 		release := make(chan struct{})
 
 		var held sync.WaitGroup
@@ -382,7 +382,7 @@ func TestAFailedDecompressionAbortsTheAnswer(t *testing.T) {
 	server := httptest.NewServer(AppHandler(fstest.MapFS{
 		"index.html":                {Data: []byte("<!doctype html>")},
 		"assets/index-abc123.js.gz": {Data: whole[:len(whole)-12]},
-	}))
+	}, AppOptions{}))
 	t.Cleanup(server.Close)
 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
@@ -411,7 +411,7 @@ func TestACopyThatIsNotGzipIsAnErrorWithoutCacheHeaders(t *testing.T) {
 	handler := AppHandler(fstest.MapFS{
 		"index.html":                {Data: []byte("<!doctype html>")},
 		"assets/index-abc123.js.gz": {Data: []byte("not gzip")},
-	})
+	}, AppOptions{})
 
 	rec := get(t, handler, http.MethodGet, "/assets/index-abc123.js", nil)
 
@@ -460,7 +460,7 @@ func TestASlotComesBackAfterAnAbortedAnswer(t *testing.T) {
 			"assets/cut-abc123.js.gz":    {Data: whole[:len(whole)-12]},
 			"assets/index-abc123.js.gz":  {Data: whole},
 			"assets/index-abc123.css.gz": {Data: gzipFixture(t, "assets/index-abc123.css")},
-		})
+		}, AppOptions{})
 
 		for range appDecompressSlots + 1 {
 			serveAborted(t, handler, httptest.NewRecorder(), "/assets/cut-abc123.js")
@@ -482,7 +482,7 @@ func TestAClientThatLeavesWhileWaitingIsAnsweredAtOnce(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		handler := AppHandler(compressedBundle(t))
+		handler := AppHandler(compressedBundle(t), AppOptions{})
 		release := make(chan struct{})
 
 		var held sync.WaitGroup

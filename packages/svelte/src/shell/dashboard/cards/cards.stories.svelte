@@ -54,9 +54,19 @@
     state: { '/state': state },
   });
 
+  const coreOne = printing('core', 'CORE One bench', 64, 42);
+
   /** A small workshop: two prints running, one idle, two that need a person. */
   const FLEET: readonly Device[] = [
-    printing('core', 'CORE One bench', 64, 42),
+    // A CORE One reports its chamber, so a card asked for it draws the box.
+    {
+      ...coreOne,
+      state: {
+        ...coreOne.state,
+        '/temperature/chamber': 38,
+        '/temperature/chamber_target': 45,
+      },
+    },
     printing('xl', 'XL corner', 18, 260),
     waiting('mk4', 'MK4S garage', 'IDLE'),
     waiting('mini', 'MINI desk', 'ATTENTION'),
@@ -65,6 +75,24 @@
 
   const contextOf = (devices: readonly Device[]) =>
     dashboardContextOver(fakeCore().client, devices).context;
+
+  const unnamed = (id: string, minutes: number): Device => {
+    const device = printing(id, id, 0, minutes);
+    const job = device.job;
+    if (job === undefined) throw new Error('the printing fixture has no job');
+    return { ...device, job: { ...job, display_name: '', path: '' } };
+  };
+  const estimatesMissing = contextOf([unnamed('no-estimate', 0)]);
+  const estimatesMixed = contextOf([
+    printing('known', 'Known estimate', 30, 10),
+    unnamed('unknown', 0),
+  ]);
+  const detailsMissing = contextOf([
+    waiting('missing', 'Printing without details', 'PRINTING'),
+  ]);
+  const statusUnknown = contextOf([
+    waiting('unknown', 'Unknown status', 'UNKNOWN'),
+  ]);
 
   const fleet = contextOf(FLEET);
   const noPrinters = contextOf([]);
@@ -90,6 +118,17 @@
 
 <Story name="Printers" asChild>
   <TileStory context={fleet} tile={PrintersTile} type="printers" />
+</Story>
+
+<Story name="Printers With Heaters" asChild>
+  <TileStory
+    context={fleet}
+    tile={PrintersTile}
+    type="printers"
+    config={{
+      fields: ['state', 'job', 'progress', 'nozzle', 'bed', 'chamber'],
+    }}
+  />
 </Story>
 
 <Story name="Printers None" asChild>
@@ -176,4 +215,17 @@
   <div class="flex h-80 w-96 flex-col rounded-sm border border-border p-3">
     <UnknownTile type="spools/left" />
   </div>
+</Story>
+
+<Story name="Finishing Estimates Unavailable" asChild>
+  <TileStory context={estimatesMissing} tile={FinishingTile} type="finishing" />
+</Story>
+<Story name="Finishing Some Estimates Missing" asChild>
+  <TileStory context={estimatesMixed} tile={FinishingTile} type="finishing" />
+</Story>
+<Story name="Finishing Print Details Missing" asChild>
+  <TileStory context={detailsMissing} tile={FinishingTile} type="finishing" />
+</Story>
+<Story name="Finishing Status Unavailable" asChild>
+  <TileStory context={statusUnknown} tile={FinishingTile} type="finishing" />
 </Story>

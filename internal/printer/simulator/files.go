@@ -190,6 +190,10 @@ func (p *Printer) fileInfoData(path string) (map[string]any, bool) {
 		// asked about that one file, so a folder's children never carry it.
 		if isPrintFile(node.Path) {
 			data["preview"] = previewPicture()
+			// The slicer's headers come with the picture. The tree's files
+			// have no contents to read them out of, so each names the same
+			// print time, in the slicer's own spelling.
+			data["estimated printing time (normal mode)"] = "1h 15m 30s"
 		}
 
 		return data, true

@@ -38,7 +38,11 @@ export {
   type PrintRow,
 } from './info';
 export { default as PrinterDetailScreen } from './printer-detail-screen.svelte';
-export { DropChoice, type DropChoiceProps } from './drop-choice';
+export {
+  type DropAction,
+  DropChoice,
+  type DropChoiceProps,
+} from './drop-choice';
 export { ReplaceQuestion, type ReplaceQuestionProps } from './replace-question';
 export {
   SaveToStorage,
@@ -47,6 +51,8 @@ export {
   type SaveToStorageProps,
 } from './save-to-storage';
 export {
+  PrinterDialog,
+  PrinterTransfers,
   PrinterStatusPanel,
   type PrinterStatusPanelProps,
   type PrinterTransferRow,

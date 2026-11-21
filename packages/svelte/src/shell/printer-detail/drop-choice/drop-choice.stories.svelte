@@ -54,13 +54,29 @@
   }}
 />
 
-<!-- Several files at once are only copied: a printer prints one at a time. -->
+<!-- Several files: one of them is printed and goes first, the rest are
+     copied. The person picks which. -->
 <Story
   name="Several Files"
   args={{
-    names: ['bracket.bgcode', 'hinge.bgcode', 'lid.bgcode'],
+    names: [
+      'Bracket_Left_Reinforced_v4_0.4n_0.2mm_PETG_MK4S_1h12m.bgcode',
+      'Bracket_Right_Reinforced_v4_0.4n_0.2mm_PETG_MK4S_1h12m.bgcode',
+      'Cable_Clip_x10_0.4n_0.2mm_PLA_MK4S_24m.bgcode',
+    ],
     printer: 'MK4 by the window',
     printTarget: free,
+    ...handlers,
+  }}
+/>
+
+<!-- Several files on a busy printer are only copied, and it says why. -->
+<Story
+  name="Several Files On A Printing Printer"
+  args={{
+    names: ['bracket.bgcode', 'hinge.bgcode', 'lid.bgcode'],
+    printer: 'MK4 by the window',
+    printTarget: printing,
     ...handlers,
   }}
 />

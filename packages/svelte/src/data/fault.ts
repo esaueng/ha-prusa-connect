@@ -16,7 +16,7 @@ export interface DataFault {
   /** The HTTP status, absent when no answer arrived. */
   readonly status: number | undefined;
   /** The problem document's parameters, for a message with placeholders. */
-  readonly params: Readonly<Record<string, string | number>>;
+  readonly params: Readonly<Record<string, string | number | boolean>>;
   /** The server's own English line, absent when there was none. */
   readonly message: string | undefined;
   /** The id the server stamped on the refusal, for a support ticket. Absent when the request never reached it. */
@@ -56,12 +56,16 @@ const numberOf = (value: unknown): number | undefined =>
 
 const paramsOf = (
   value: unknown,
-): Readonly<Record<string, string | number>> => {
+): Readonly<Record<string, string | number | boolean>> => {
   if (typeof value !== 'object' || value === null) return {};
 
-  const kept: Record<string, string | number> = {};
+  const kept: Record<string, string | number | boolean> = {};
   for (const [name, given] of Object.entries(value)) {
-    if (typeof given === 'string' || typeof given === 'number') {
+    if (
+      typeof given === 'string' ||
+      typeof given === 'number' ||
+      typeof given === 'boolean'
+    ) {
       kept[name] = given;
     }
   }

@@ -2,7 +2,7 @@
 // Do not edit: change the source and regenerate.
 
 /** The event-type vocabulary version these names come from. */
-export const eventTypesVersion = "3.8.0";
+export const eventTypesVersion = "3.9.0";
 
 /** An event type this build publishes on GET /api/v1/events. */
 export type EventType =
@@ -11,6 +11,7 @@ export type EventType =
   | "com.prusa.connect.device.presence.changed"
   | "com.prusa.connect.device.link.changed"
   | "com.prusa.connect.device.issues.changed"
+  | "com.prusa.connect.device.state.changed"
   | "com.prusa.connect.device.telemetry.sampled"
   | "com.prusa.connect.device.record.changed"
   | "com.prusa.connect.device.storages.changed"
@@ -54,6 +55,7 @@ export const eventTypes: readonly EventType[] = [
   "com.prusa.connect.device.presence.changed",
   "com.prusa.connect.device.link.changed",
   "com.prusa.connect.device.issues.changed",
+  "com.prusa.connect.device.state.changed",
   "com.prusa.connect.device.telemetry.sampled",
   "com.prusa.connect.device.record.changed",
   "com.prusa.connect.device.storages.changed",
@@ -95,6 +97,7 @@ export const eventClasses: Readonly<Record<EventType, EventClass>> = {
   "com.prusa.connect.device.presence.changed": "state",
   "com.prusa.connect.device.link.changed": "state",
   "com.prusa.connect.device.issues.changed": "state",
+  "com.prusa.connect.device.state.changed": "state",
   "com.prusa.connect.device.telemetry.sampled": "telemetry",
   "com.prusa.connect.device.record.changed": "state",
   "com.prusa.connect.device.storages.changed": "state",

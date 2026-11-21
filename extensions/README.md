@@ -13,6 +13,7 @@ either is tested against it before it merges.
 | `buddy-debug-logs/` | Prusa printer logs: what printers send over UDP, with a Go half and a browser half. See [its README](buddy-debug-logs/README.md) |
 | `server-slicing/` | slices 3MF projects into G-code with the PrusaSlicer command line, with a Go half and a browser half. See [its README](server-slicing/README.md) |
 | `materials/` | OpenPrintTag materials and the spools kept of them: a Go half and a browser half. See [its README](materials/README.md) |
+| `simple-queue/` | a print queue for each printer, with a Go half and a browser half. See [its README](simple-queue/README.md) |
 
 ## Who maintains them
 

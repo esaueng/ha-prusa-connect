@@ -336,6 +336,11 @@ func renderFile(file deviceapi.File) map[string]any {
 		"size":         file.Size,
 		"modified":     modified,
 		"read_only":    file.ReadOnly,
+
+		"estimated_seconds": optional(file.EstimatedSeconds),
+		"printer_model":     optional(file.PrinterModel),
+		"layer_height_mm":   optional(file.LayerHeightMM),
+		"material":          optional(file.Material),
 	}
 }
 
@@ -470,4 +475,14 @@ func textArgs(p graphql.ResolveParams, name string) map[string]string {
 	}
 
 	return out
+}
+
+// optional answers nothing for a fact a file does not name: the zero value.
+func optional[T comparable](value T) any {
+	var zero T
+	if value == zero {
+		return nil
+	}
+
+	return value
 }

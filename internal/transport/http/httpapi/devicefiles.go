@@ -70,6 +70,12 @@ type DeviceFile struct {
 	Size        int64      `json:"size"                   doc:"Bytes the entry occupies, zero for a folder."`
 	Modified    *time.Time `json:"modified,omitempty"     doc:"When the entry last changed, as an RFC 3339 string. The printer reports whole seconds, so this value has no fraction of a second. It is absent for a board that reported no timestamp."`
 	ReadOnly    bool       `json:"read_only"              doc:"Whether the printer refuses to change this entry."`
+	// EstimatedSeconds comes with the answer about one file only, as the
+	// picture does: a listing of a folder names no times.
+	EstimatedSeconds int64   `json:"estimated_seconds,omitempty" doc:"The print time the slicer estimated, in whole seconds, as the printer read it out of the file. It is present only on the directory of an answer about one print file, and absent for a printer or a file that names none."`
+	PrinterModel     string  `json:"printer_model,omitempty"     doc:"The printer the file was sliced for, such as XL2IS. Present only on the directory of an answer about one print file that names it."`
+	LayerHeightMM    float64 `json:"layer_height_mm,omitempty"   doc:"The layer height the file was sliced with, in millimetres. Present only on the directory of an answer about one print file that names it."`
+	Material         string  `json:"material,omitempty"          doc:"The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Present only on the directory of an answer about one print file that names it."`
 }
 
 // DeviceListing is one directory of a device's own file tree.
@@ -136,6 +142,9 @@ type DeviceUpload struct {
 	Source  string `json:"source"            doc:"The file's path inside that storage, relative to its root. A path a temporary upload answered (upload-storage-object with temporary=true) names a copy the server deletes once the file has landed or the transfer was stopped. After a failed send it is kept for one hour, so the same source can be sent again." maxLength:"1024"`
 	Path    string `json:"path"              doc:"Where the file lands on the printer: storage-prefixed and relative, such as usb/part.bgcode."                                                                                                                                                                                                                       maxLength:"1024"`
 	Replace bool   `json:"replace,omitempty" doc:"Delete a file the printer already holds at path before sending this one. Without it such a file is refused with core.printer/FILE_NAME_TAKEN, so a page can ask the person first."`
+	// KeepBoth sits after Replace in DevicePrint too, so one converts to the
+	// other.
+	KeepBoth bool `json:"keep_both,omitempty" doc:"Send under a free name when the printer already holds a file at path, such as usb/part[1].bgcode, and keep the printer's file. The transfer names the path the file lands at. Refused together with replace."`
 }
 
 type sendFileInput struct {

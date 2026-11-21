@@ -16,6 +16,7 @@ import type { ModulePrincipal } from '../domain/principal';
 import type { Translate } from '../i18n';
 import type { ModuleRegister } from './generated';
 import type { ScopedStore } from './module-store.svelte';
+import type { StoredFileRef } from './registry.svelte';
 
 /** Why `host.components.load` could not answer a component. */
 export type ComponentReason =
@@ -115,11 +116,49 @@ export interface ModuleHost {
    */
   readonly signal: AbortSignal;
   /**
+   * The namespace this module was installed under, such as the one its routes
+   * are served at. A module never reads it out of an address.
+   */
+  readonly namespace: string;
+  /**
+   * Who this module's own process is to the server's grants: its instance's
+   * kind and name, such as `sink:simple-queue`. A page writes a grant to it
+   * to let the module act by itself. It is not the person on the page, who
+   * is `principal`.
+   */
+  readonly self: string;
+  /**
    * The address of one of this module's own pages, for a link from a card or
    * a section to it: `/m/<namespace>/<path>` (ADR-20260911-4p6 rule 9). A module does
    * not know the namespace it was installed under, so the host writes it.
    */
   pageHref(path: string): string;
+  /**
+   * Sends files from the person's computer to a printer the way a file
+   * dropped on that printer's page is sent: the page asks whether to keep a
+   * copy in a storage of this server, with the module's own entry of the
+   * device-upload-action slot picked, and that entry runs on each file while
+   * it is on its way. `action` is the id of that entry. It works while the
+   * printer's page is open, such as from a tab of it. A core without it
+   * leaves it out, so a module checks for it.
+   */
+  uploadToPrinter?(
+    deviceId: string,
+    files: readonly File[],
+    action: string,
+  ): void;
+  /**
+   * Copies files from a storage of this server to a printer, as the
+   * printer's page copies one, and runs the module's own entry of the
+   * device-upload-action slot on each while it is on its way. A name the
+   * printer already holds is asked about on that page. It works while the
+   * printer's page is open. A core without it leaves it out.
+   */
+  sendToPrinter?(
+    deviceId: string,
+    files: readonly StoredFileRef[],
+    action: string,
+  ): void;
 }
 
 /** What a bundle default-exports. */

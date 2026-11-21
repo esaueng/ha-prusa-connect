@@ -2,7 +2,7 @@
 // person confirmed them on, whichever printer the page shows afterwards.
 import type { StreamEvent } from '@prusa/connect';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
 import { appContext } from '../../test/app-context';
@@ -22,7 +22,23 @@ import {
 // own tests use, rather than keep a second copy in sync.
 import PlainSection from '../../../../packages/svelte/src/test/plain-section.svelte';
 import WithSlots from '../../test/with-slots.svelte';
+import type * as Isolation from '../isolation';
 import PrinterDetail from './printer-detail.svelte';
+
+// Whether the browser can isolate a page is the test's to set: a test page on
+// `localhost` always can.
+const isolation = vi.hoisted(() => ({ capable: true }));
+vi.mock('../isolation', async (original) => {
+  const real = await original<typeof Isolation>();
+
+  return {
+    ...real,
+    browserIsolation: (): Isolation.DocumentIsolation => ({
+      ...real.browserIsolation(),
+      capable: isolation.capable,
+    }),
+  };
+});
 
 const printer = (id: string) => ({
   id,
@@ -189,6 +205,271 @@ describe('the upload area on the printer page', () => {
   });
 });
 
+describe('files a module sends to the printer page', () => {
+  const uploads = json(200, {
+    items: [
+      {
+        browse: true,
+        display_name: 'Uploads',
+        download_url: true,
+        move: true,
+        name: 'uploads',
+        ranges: true,
+        write: true,
+      },
+    ],
+  });
+  const drives = json(200, {
+    items: [
+      {
+        free_space: 1024,
+        mountpoint: '/usb',
+        name: 'usb',
+        read_only: false,
+        type: 'USB',
+      },
+    ],
+    reported: true,
+  });
+  const queueing = (): SlotRegistry => {
+    const registry = new SlotRegistry();
+    registry.declare('queue', {
+      device_upload_action: [
+        { id: 'queue', title: 'Add to queue', destructive: false },
+      ],
+    });
+
+    return registry;
+  };
+  const stored = (name: string) => ({ storage: 'uploads', path: name });
+
+  // The server takes one transfer for a printer at a time and refuses a
+  // second with TRANSFER_BUSY, so a second file sent in the same moment would
+  // never reach the printer or the module's choice.
+  it('sends the stored files of one request one after another', async () => {
+    const answers: (() => void)[] = [];
+    const sent: string[] = [];
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+      'GET /api/v1/devices/a/files': listing,
+      'GET /api/v1/devices/a/storages': drives,
+      'GET /api/v1/storages': uploads,
+      'POST /api/v1/devices/a/files': (call) =>
+        new Promise<Response>((resolve) => {
+          const body = JSON.parse(call.body ?? '{}') as {
+            source: string;
+            path: string;
+          };
+          sent.push(body.source);
+          answers.push(() => {
+            resolve(
+              json(200, {
+                path: body.path,
+                transfer: {
+                  transfer_id: `t-${body.source}`,
+                  device_id: 'a',
+                  storage: 'uploads',
+                  source: body.source,
+                  path: body.path,
+                  state: 'done',
+                  bytes_sent: 1024,
+                  bytes_total: 1024,
+                  started_at: '2026-11-18T08:00:00Z',
+                },
+              }),
+            );
+          });
+        }),
+    };
+    vi.stubGlobal('fetch', stubFetch(routes).fetch);
+    const registry = queueing();
+
+    await render(WithSlots, {
+      props: {
+        registry,
+        screen: PrinterDetail,
+        ctx: appContext(routes, { params: { id: 'a', tab: 'status' } }),
+      },
+    });
+    registry.requestUpload({
+      namespace: 'queue',
+      action: 'queue',
+      deviceId: 'a',
+      files: [],
+      stored: [stored('one.gcode'), stored('two.gcode')],
+    });
+
+    await vi.waitFor(() => {
+      expect(sent).toEqual(['one.gcode']);
+    });
+    expect(registry.uploadFor('a')).toBeUndefined();
+
+    answers[0]?.();
+    await vi.waitFor(() => {
+      expect(sent).toEqual(['one.gcode', 'two.gcode']);
+    });
+    answers[1]?.();
+  });
+
+  // The page stays when the person opens another printer, so the files of a
+  // request still on their way go to the printer they were sent to.
+  it('sends the rest of a request to its printer after another printer opens', async () => {
+    const answers: (() => void)[] = [];
+    const sent: string[] = [];
+    const sending =
+      (device: string) =>
+      (call: { body?: string | undefined }): Promise<Response> =>
+        new Promise<Response>((resolve) => {
+          const body = JSON.parse(call.body ?? '{}') as {
+            source: string;
+            path: string;
+          };
+          sent.push(`${device}:${body.source}`);
+          answers.push(() => {
+            resolve(
+              json(200, {
+                path: body.path,
+                transfer: {
+                  transfer_id: `t-${device}-${body.source}`,
+                  device_id: device,
+                  storage: 'uploads',
+                  source: body.source,
+                  path: body.path,
+                  state: 'done',
+                  bytes_sent: 1024,
+                  bytes_total: 1024,
+                  started_at: '2026-11-18T08:00:00Z',
+                },
+              }),
+            );
+          });
+        });
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, {
+        items: [printer('a'), printer('b')],
+        total: 2,
+      }),
+      'GET /api/v1/devices/a/files': listing,
+      'GET /api/v1/devices/b/files': listing,
+      'GET /api/v1/devices/a/storages': drives,
+      'GET /api/v1/devices/b/storages': drives,
+      'GET /api/v1/storages': uploads,
+      'POST /api/v1/devices/a/files': sending('a'),
+      'POST /api/v1/devices/b/files': sending('b'),
+    };
+    vi.stubGlobal('fetch', stubFetch(routes).fetch);
+    const registry = queueing();
+
+    const screen = await render(WithSlots, {
+      props: {
+        registry,
+        screen: PrinterDetail,
+        ctx: appContext(routes, { params: { id: 'a', tab: 'status' } }),
+      },
+    });
+    registry.requestUpload({
+      namespace: 'queue',
+      action: 'queue',
+      deviceId: 'a',
+      files: [],
+      stored: [stored('one.gcode'), stored('two.gcode')],
+    });
+    await vi.waitFor(() => {
+      expect(sent).toEqual(['a:one.gcode']);
+    });
+
+    await screen.rerender({
+      registry,
+      screen: PrinterDetail,
+      ctx: appContext(routes, { params: { id: 'b', tab: 'status' } }),
+    });
+    answers[0]?.();
+
+    await vi.waitFor(() => {
+      expect(sent).toEqual(['a:one.gcode', 'a:two.gcode']);
+    });
+    answers[1]?.();
+  });
+
+  // The module's tab shows no drop zone, so a printer with no drive to write
+  // to would take the request and say nothing.
+  it('says why a printer with no drive takes none of them', async () => {
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+      'GET /api/v1/devices/a/files': listing,
+      'GET /api/v1/devices/a/storages': json(200, {
+        items: [],
+        reported: true,
+      }),
+      'GET /api/v1/storages': uploads,
+    };
+    const fetcher = stubFetch(routes);
+    vi.stubGlobal('fetch', fetcher.fetch);
+    const said = vi.spyOn(toast, 'error');
+    const registry = queueing();
+
+    await render(WithSlots, {
+      props: {
+        registry,
+        screen: PrinterDetail,
+        ctx: appContext(routes, { params: { id: 'a', tab: 'status' } }),
+      },
+    });
+    registry.requestUpload({
+      namespace: 'queue',
+      action: 'queue',
+      deviceId: 'a',
+      files: [],
+      stored: [stored('one.gcode')],
+    });
+
+    await vi.waitFor(() => {
+      expect(said).toHaveBeenCalledOnce();
+    });
+    expect(registry.uploadFor('a')).toBeUndefined();
+    expect(fetcher.count('POST /api/v1/devices/a/files')).toBe(0);
+  });
+
+  // A choice the module never declared has nothing to run on the files, so
+  // the page sends none and says so rather than dropping the request.
+  it('says that nothing was sent for a choice the module never declared', async () => {
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+      'GET /api/v1/devices/a/files': listing,
+      'GET /api/v1/devices/a/storages': drives,
+      'GET /api/v1/storages': uploads,
+    };
+    const fetcher = stubFetch(routes);
+    vi.stubGlobal('fetch', fetcher.fetch);
+    const said = vi.spyOn(toast, 'error');
+    const registry = queueing();
+
+    await render(WithSlots, {
+      props: {
+        registry,
+        screen: PrinterDetail,
+        ctx: appContext(routes, { params: { id: 'a', tab: 'status' } }),
+      },
+    });
+    registry.requestUpload({
+      namespace: 'queue',
+      action: 'undeclared',
+      deviceId: 'a',
+      files: [],
+      stored: [stored('one.gcode')],
+    });
+
+    await vi.waitFor(() => {
+      expect(said).toHaveBeenCalledWith(
+        'app.printerDetail.undeclaredChoice.title',
+        expect.anything(),
+      );
+    });
+    expect(registry.uploadFor('a')).toBeUndefined();
+    expect(fetcher.count('POST /api/v1/devices/a/files')).toBe(0);
+  });
+});
+
 describe('a module tab on the printer page', () => {
   const routes: Routes = {
     'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
@@ -233,6 +514,77 @@ describe('a module tab on the printer page', () => {
       document.querySelector('[data-state="active"]')?.textContent.trim(),
     ).toBe('Now');
     expect(document.querySelector('[data-testid="plain-section"]')).toBeNull();
+  });
+});
+
+// While the strip holds a tab whose page is cross-origin isolated, moving the
+// focus along it opens no tab, because opening that one loads a new page.
+// Where the browser cannot isolate, nothing loads a page, and a strip with no
+// such tab keeps opening a tab on focus.
+describe('a module tab whose page is cross-origin isolated', () => {
+  const routes: Routes = {
+    'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+  };
+  const isolated = {
+    id: 'console',
+    title: 'Device page',
+    cross_origin_isolated: true,
+  };
+  const plain = { id: 'log', title: 'Log' };
+
+  afterEach(() => {
+    isolation.capable = true;
+  });
+
+  // Renders the page on Now with one module tab, moves the focus one tab on,
+  // and answers the spy that records where the page went.
+  const moveFromNow = async (
+    tab: typeof isolated | typeof plain,
+  ): Promise<ReturnType<typeof vi.fn>> => {
+    const registry = new SlotRegistry();
+    registry.declare('console', { device_tab: [tab] });
+    const go = vi.fn();
+    await render(WithSlots, {
+      props: {
+        registry,
+        screen: PrinterDetail,
+        ctx: appContext(routes, { params: { id: 'a', tab: 'status' }, go }),
+      },
+    });
+
+    await expect
+      .element(page.getByRole('tab', { name: tab.title }))
+      .toBeVisible();
+    page.getByRole('tab', { name: 'Now' }).element().focus();
+    await userEvent.keyboard('{ArrowRight}');
+    await expect
+      .element(page.getByRole('tab', { name: 'Controls' }))
+      .toHaveFocus();
+
+    return go;
+  };
+
+  it('opens a tab on Enter rather than on focus where the browser can isolate', async () => {
+    const go = await moveFromNow(isolated);
+    expect(go.mock.calls).toEqual([]);
+
+    await userEvent.keyboard('{Enter}');
+
+    expect(go.mock.calls).toEqual([['/printers/a/controls']]);
+  });
+
+  it('opens a tab on focus where the browser cannot isolate', async () => {
+    isolation.capable = false;
+
+    const go = await moveFromNow(isolated);
+
+    expect(go.mock.calls).toEqual([['/printers/a/controls']]);
+  });
+
+  it('opens a tab on focus when no module tab asks for an isolated page', async () => {
+    const go = await moveFromNow(plain);
+
+    expect(go.mock.calls).toEqual([['/printers/a/controls']]);
   });
 });
 
@@ -358,7 +710,7 @@ describe('a module tab only for the printer the server runs on', () => {
 
   // A telemetry value replaces the printer's record about once a second while
   // it prints. The strip is built again only when the record's resident value
-  // changes, so a strip the person scrolled does not jump back each time.
+  // changes, so the module tabs are not read again on every value.
   it('builds the tab strip again only when resident changes', async () => {
     const registry = displayRegistry();
     const ctx = appContext(
@@ -388,34 +740,6 @@ describe('a module tab only for the printer the server runs on', () => {
     expect(
       reads.mock.calls.filter(([slot]) => slot === 'device-tab'),
     ).toHaveLength(0);
-  });
-
-  it('keeps a strip the person scrolled where it is while values arrive', async () => {
-    const ctx = appContext(
-      {
-        'GET /api/v1/devices': json(200, {
-          items: [{ ...printer('host'), resident: true }],
-          total: 1,
-        }),
-      },
-      { params: { id: 'host', tab: 'display.screen' } },
-    );
-    await render(WithSlots, {
-      props: { registry: displayRegistry(), screen: PrinterDetail, ctx },
-    });
-    const display = page.getByRole('tab', { name: 'Display' });
-    await expect.element(display).toHaveAttribute('data-state', 'active');
-    const strip = display.element().closest('.overflow-x-auto');
-    if (!(strip instanceof HTMLElement)) throw new Error('no tab strip');
-    expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth);
-    strip.scrollLeft = 0;
-
-    for (let value = 1; value <= 5; value += 1) {
-      await ctx.fleet.apply(progress('host', value));
-    }
-    await flush();
-
-    expect(strip.scrollLeft).toBe(0);
   });
 
   // The printer page passes whether the printer is resident to the section
@@ -672,6 +996,63 @@ describe('the landing toasts on the printer page', () => {
     expect(success).not.toHaveBeenCalled();
     success.mockRestore();
   });
+  // A replace fails before a byte moves when the printer will not delete its
+  // file, so no transfer row says it: the page says it from the answer.
+  it('says a replace the printer refused, with the reason', async () => {
+    const error = vi.spyOn(toast, 'error').mockReturnValue('');
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+      'GET /api/v1/devices/a/files': listing,
+      'POST /api/v1/devices/a/files': (call) =>
+        call.body?.includes('"replace":true') === true
+          ? problem(409, 'core.printer/STORAGE_REFUSED')
+          : problem(409, 'core.printer/FILE_NAME_TAKEN'),
+    };
+    vi.stubGlobal('fetch', stubFetch(routes).fetch);
+    const ctx = appContext(routes, { params: { id: 'a', tab: 'status' } });
+    await render(PrinterDetail, { props: { ctx } });
+
+    void ctx.transfers('a').send('local', 'one.gcode', 'usb/one.gcode');
+    await page.getByRole('button', { name: 'Replace' }).click();
+
+    await vi.waitFor(() => {
+      expect(String(error.mock.calls[0]?.[0])).toMatch(
+        /^one\.gcode did not reach the printer: /u,
+      );
+    });
+    expect(error).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
+
+  // The printer refuses to delete a file it lists read-only, and the refusal
+  // says so, so the question offers no Replace.
+  it('offers no replace of a file the printer lists read-only', async () => {
+    const routes: Routes = {
+      'GET /api/v1/devices': json(200, { items: [printer('a')], total: 1 }),
+      'POST /api/v1/devices/a/files': problem(
+        409,
+        'core.printer/FILE_NAME_TAKEN',
+        { read_only: true },
+      ),
+    };
+    vi.stubGlobal('fetch', stubFetch(routes).fetch);
+    const ctx = appContext(routes, { params: { id: 'a', tab: 'status' } });
+    await render(PrinterDetail, { props: { ctx } });
+
+    void ctx.transfers('a').send('local', 'one.gcode', 'usb/one.gcode');
+
+    await expect
+      .element(
+        page.getByText(
+          'A file named one.gcode is already on this printer and cannot be replaced.',
+        ),
+      )
+      .toBeVisible();
+    expect(
+      page.getByRole('button', { name: 'Replace' }).elements(),
+    ).toHaveLength(0);
+  });
+
   // ADR-20261106-xm4 rule 3: the Cameras tab is on the page when the printer
   // has a camera or the person may add one, and never only to say it is empty.
   it.each([

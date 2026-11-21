@@ -268,6 +268,118 @@ func TestAFileInfoForOneFileCarriesItsPicture(t *testing.T) {
 	}
 }
 
+// The firmware sends the slicer's headers of a print file beside its picture
+// (Prusa-Firmware-Buddy src/connect/render.cpp, the meta records). The print
+// time arrives as the slicer wrote it, "2h 5m 3s", and as whole seconds under
+// the name a file Connect prepared carries. A value this driver cannot read is
+// no time at all, and never a wrong one.
+func TestAFileInfoForOneFileCarriesItsPrintTime(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		header string
+		want   int64
+	}{
+		{name: "as the slicer writes it", header: `"estimated printing time (normal mode)":"2h 5m 3s"`, want: 7503},
+		{name: "days and minutes", header: `"estimated printing time (normal mode)":"1d 30m"`, want: 88200},
+		{name: "seconds alone", header: `"estimated printing time (normal mode)":"42s"`, want: 42},
+		{name: "whole seconds", header: `"estimated_print_time":930`, want: 930},
+		{name: "seconds win over the text", header: `"estimated_print_time":930,` +
+			`"estimated printing time (normal mode)":"2h"`, want: 930},
+		{name: "absent", header: `"layer_height":0.2`, want: 0},
+		{name: "not a duration", header: `"estimated printing time (normal mode)":"soon"`, want: 0},
+		{name: "a unit nobody writes", header: `"estimated printing time (normal mode)":"3w 1h"`, want: 0},
+		{name: "a unit with no number", header: `"estimated printing time (normal mode)":"1h m"`, want: 0},
+		{name: "a negative part", header: `"estimated printing time (normal mode)":"-5m"`, want: 0},
+		{name: "past a year", header: `"estimated printing time (normal mode)":"900000d"`, want: 0},
+		{name: "seconds past a year fall back to nothing", header: `"estimated_print_time":99999999999`, want: 0},
+		// A file writes these headers, so each can hold any type. None of them
+		// may cost the listing and the picture that came in the same answer.
+		{name: "seconds as text", header: `"estimated_print_time":"930"`, want: 930},
+		{name: "seconds with a part", header: `"estimated_print_time":930.5`, want: 930},
+		{name: "seconds that are a duration", header: `"estimated_print_time":"1h 2m"`, want: 0},
+		{name: "seconds of another type", header: `"estimated_print_time":{"s":930}`, want: 0},
+		{name: "the text as a number", header: `"estimated printing time (normal mode)":7503`, want: 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := json.RawMessage(`{"event":"FILE_INFO","data":{"path":"/usb/part.bgcode",` +
+				`"type":"PRINT_FILE","size":10,"filament used [g]":12.5,` + tc.header + `}}`)
+
+			listing, ok := listingFrom(payload)
+			if !ok {
+				t.Fatal("a FILE_INFO for one file was not read as a listing")
+			}
+
+			if listing.Directory.EstimatedSeconds != tc.want {
+				t.Errorf("the print time reads %d s, want %d", listing.Directory.EstimatedSeconds, tc.want)
+			}
+		})
+	}
+}
+
+// Beside the time, the headers name the printer the file was sliced for, the
+// layer height and the material. A value of a type this driver does not expect
+// is no value, and the rest of the answer still reads.
+func TestAFileInfoForOneFileCarriesWhatTheSlicerWrote(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		headers string
+		want    connectorapi.File
+	}{
+		{
+			name:    "as the firmware sends them",
+			headers: `"printer_model":"XL2IS","layer_height":0.2,"filament_type":"PLA"`,
+			want:    connectorapi.File{PrinterModel: "XL2IS", LayerHeightMM: 0.2, Material: "PLA"},
+		},
+		{
+			name:    "a material for each tool",
+			headers: `"filament_type":"PLA;PETG"`,
+			want:    connectorapi.File{Material: "PLA;PETG"},
+		},
+		{
+			name:    "types nobody writes",
+			headers: `"printer_model":7,"layer_height":"thin","filament_type":["PLA"]`,
+		},
+		{
+			name:    "a layer height out of bounds",
+			headers: `"layer_height":-0.2`,
+		},
+		{
+			name:    "a name too long to be a model",
+			headers: `"printer_model":"` + strings.Repeat("X", 65) + `"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := json.RawMessage(`{"event":"FILE_INFO","data":{"path":"/usb/part.bgcode",` +
+				`"type":"PRINT_FILE","size":10,` + tc.headers + `}}`)
+
+			listing, ok := listingFrom(payload)
+			if !ok {
+				t.Fatal("a FILE_INFO for one file was not read as a listing")
+			}
+
+			got := listing.Directory
+			if got.PrinterModel != tc.want.PrinterModel || got.LayerHeightMM != tc.want.LayerHeightMM ||
+				got.Material != tc.want.Material {
+				t.Errorf("read model %q, layer %v, material %q; want %q, %v, %q",
+					got.PrinterModel, got.LayerHeightMM, got.Material,
+					tc.want.PrinterModel, tc.want.LayerHeightMM, tc.want.Material)
+			}
+		})
+	}
+}
+
 // A payload that is not a FILE_INFO node is not a listing. Reading one as an
 // empty directory would report a folder with nothing in it for every answer the
 // firmware gives that this driver has no reading of.

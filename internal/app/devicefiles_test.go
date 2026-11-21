@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -24,6 +25,7 @@ import (
 	"github.com/prusa3d/prusa-connect/internal/transport/http/httpfault"
 	"github.com/prusa3d/prusa-connect/internal/transport/stream"
 	"github.com/prusa3d/prusa-connect/sdk/connectorapi"
+	"github.com/prusa3d/prusa-connect/sdk/deviceapi"
 	"github.com/prusa3d/prusa-connect/sdk/event"
 )
 
@@ -106,6 +108,32 @@ func TestASimulatedPrinterServesThePictureInsideItsFile(t *testing.T) {
 	folder := running.get(t, base+url.QueryEscape("usb/examples"))
 	require.Equal(t, http.StatusNotFound, folder.status, folder.body)
 	require.Contains(t, folder.body, "core.storage/NO_THUMBNAIL")
+}
+
+// A printer reads the slicer's print time out of a file it is asked about,
+// beside the picture. The answer about that one file carries it in seconds,
+// and a folder's listing names no times, because the printer reads no file
+// for it.
+func TestASimulatedPrinterSaysHowLongItsFilePrints(t *testing.T) {
+	t.Parallel()
+
+	running := start(t, t.TempDir(), "core:\n  log:\n    level: error\n")
+
+	dialIn(t, running, "SIM-TIME-1")
+
+	listed := printers(t, running)
+	require.Len(t, listed, 1)
+
+	one := filesOf(t, running, listed[0].ID, "usb/tangle.bgcode")
+	require.False(t, one.Directory.Folder)
+	require.Equal(t, int64(4530), one.Directory.EstimatedSeconds, "the simulator names 1h 15m 30s")
+
+	stick := filesOf(t, running, listed[0].ID, "usb")
+	require.Zero(t, stick.Directory.EstimatedSeconds)
+
+	for _, entry := range stick.Items {
+		require.Zero(t, entry.EstimatedSeconds, "%s is an entry of a folder", entry.Path)
+	}
 }
 
 // A path that leaves the storage it names is refused with a 400 carrying the
@@ -770,6 +798,82 @@ func TestAnUnfinishedReadMayBeAskedAgain(t *testing.T) {
 	require.Equal(t, httpfault.CodeListingUnfinished(), payload.Code)
 	require.True(t, payload.Retryable)
 	require.Contains(t, mustJSON(t, payload.Params), "usb")
+}
+
+// A module that asks for what this server holds of a path is answered at
+// once. Nothing held is answered with no rows while the read it starts runs,
+// and the rows that read brought are answered after it without the printer.
+func TestAModuleCachedListingNeverWaitsForThePrinter(t *testing.T) {
+	t.Parallel()
+
+	session := newSlowListingSession("SIM-FILES-CACHED")
+	plane, id, owner := arriveListing(t, session, session.patches)
+	fleet := moduleFleet{fleet: plane}
+	cached := deviceapi.FilesParams{ID: id, Path: "usb", Cached: true}
+
+	began := time.Now()
+	cold, err := fleet.listing(t.Context(), owner, cached)
+	require.NoError(t, err)
+	require.Less(t, time.Since(began), listingGrace, "a cached read waited the grace a person's read is given")
+	require.True(t, cold.Reading, "a cached read of nothing held did not say it reads")
+	require.Empty(t, cold.Items)
+
+	// Nothing is held of the path yet, so the module is not told it is a
+	// folder: it may be a file.
+	unread, err := fleet.Files(t.Context(), deviceapi.FilesParams{Principal: owner, ID: id, Path: "usb", Cached: true})
+	require.NoError(t, err)
+	require.Nil(t, unread.Entry, "a path nothing is held of was answered as an entry")
+	require.Empty(t, unread.Items)
+
+	close(session.release)
+	require.Eventually(t, func() bool {
+		held, readErr := fleet.listing(t.Context(), owner, cached)
+
+		return readErr == nil && !held.Reading && len(held.Items) > 0
+	}, settle, time.Millisecond, "the read the cached ask started never landed")
+
+	read, err := fleet.Files(t.Context(), deviceapi.FilesParams{Principal: owner, ID: id, Path: "usb", Cached: true})
+	require.NoError(t, err)
+	require.NotNil(t, read.Entry, "a held folder was answered with no entry")
+	require.True(t, read.Entry.Folder)
+	require.NotEmpty(t, read.Items)
+
+	asked := session.lists.Load()
+	_, err = fleet.listing(t.Context(), owner, cached)
+	require.NoError(t, err)
+	require.Equal(t, asked, session.lists.Load(), "a cached read of a held folder asked the printer")
+}
+
+// A cached read of a path whose last read failed says no entry and no rows,
+// and puts no second read on the printer for that ask.
+func TestAModuleCachedListingOfAFailedPathAsksThePrinterNoMore(t *testing.T) {
+	t.Parallel()
+
+	session := newListingSession("SIM-FILES-CACHED-FAILED")
+	session.refuse = errors.New("the printer refused the listing")
+	plane, id, owner := arriveListing(t, session, session.patches)
+	fleet := moduleFleet{fleet: plane}
+	cached := deviceapi.FilesParams{Principal: owner, ID: id, Path: "usb", Cached: true}
+
+	_, err := fleet.Files(t.Context(), cached)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		held, readErr := fleet.listing(t.Context(), owner, cached)
+
+		return readErr == nil && !held.Reading && held.Fault != nil
+	}, settle, time.Millisecond, "the read the cached ask started never failed")
+
+	session.mu.Lock()
+	background := slices.Clone(session.background)
+	session.mu.Unlock()
+	require.Equal(t, []bool{true}, background, "the read a cached ask started was not a background one")
+
+	asked := session.lists.Load()
+	failed, err := fleet.Files(t.Context(), cached)
+	require.NoError(t, err)
+	require.Nil(t, failed.Entry, "a path whose read failed was answered as an entry")
+	require.Empty(t, failed.Items)
+	require.Equal(t, asked, session.lists.Load(), "a cached read of a failed path asked the printer again")
 }
 
 // A module reads a folder through FilesNow, which waits for the printer: the

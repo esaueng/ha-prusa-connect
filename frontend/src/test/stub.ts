@@ -40,7 +40,11 @@ export const json = (status: number, body: unknown): Response =>
     headers: { 'content-type': 'application/json' },
   });
 
-export const problem = (status: number, code: string): Response =>
+export const problem = (
+  status: number,
+  code: string,
+  params: Record<string, string | number | boolean> = {},
+): Response =>
   new Response(
     JSON.stringify({
       type: 'about:blank',
@@ -48,7 +52,7 @@ export const problem = (status: number, code: string): Response =>
       code,
       title: 'refused',
       detail: `the server refused with ${code}`,
-      params: {},
+      params,
       retryable: false,
       trace_id: 'trace-1',
     }),

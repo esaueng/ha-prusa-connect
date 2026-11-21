@@ -73,6 +73,11 @@ export interface TakenName {
   readonly path: string;
   /** True when the file is to be printed once it lands, not only sent. */
   readonly print?: boolean | undefined;
+  /**
+   * True when the printer lists its file under that name read-only and
+   * refuses to delete it, so it cannot be replaced now.
+   */
+  readonly readOnly?: boolean | undefined;
 }
 
 /**
@@ -184,8 +189,8 @@ export class Transfers {
 
   /**
    * The send waiting for the person to say whether to replace the file the
-   * printer holds under its name. They answer through replaceTaken and
-   * keepTaken.
+   * printer holds under its name. They answer through replaceTaken,
+   * bothTaken and keepTaken.
    */
   get taken(): TakenName | undefined {
     return this.#taken[0];
@@ -201,20 +206,60 @@ export class Transfers {
 
   /**
    * Sends the waiting file again, replacing the printer's file. It ends as
-   * the send or print does, in `error` when that fails, and answers what the
-   * printer made of the start when the file was to be printed.
+   * the send or print does, in `error` when that fails, and answers how it
+   * ended: the fault of a send or print that failed, with what the printer
+   * made of the start when the file was to be printed.
+   *
+   * The question goes at once, and the file goes through `inTurn`, which a
+   * caller that queues the files for this printer passes, so the file waits
+   * for a transfer already going to the printer. An `inTurn` that answers
+   * undefined was cancelled, and the replace ends with nothing to say.
    */
-  async replaceTaken(): Promise<PrintEnd | undefined> {
+  async replaceTaken(
+    inTurn: <T>(work: () => Promise<T>) => Promise<T | undefined> = (work) =>
+      work(),
+  ): Promise<PrintEnd | undefined> {
     const [waiting, ...rest] = this.#taken;
     this.#taken = rest;
     if (waiting === undefined) return undefined;
 
     if (waiting.print === true) {
-      return this.print(waiting.storage, waiting.source, waiting.path, true);
+      return inTurn(() =>
+        this.print(waiting.storage, waiting.source, waiting.path, true),
+      );
     }
-    await this.send(waiting.storage, waiting.source, waiting.path, true);
+    const answered = await inTurn(() =>
+      this.#sending(waiting.storage, waiting.source, waiting.path, true),
+    );
+    const fault = answered?.fault;
 
-    return undefined;
+    return fault === undefined ? undefined : { fault };
+  }
+
+  /**
+   * Sends the waiting file again under a free name, such as part[1].bgcode,
+   * and leaves the printer's file where it is. It ends as replaceTaken does,
+   * and goes through `inTurn` as replaceTaken does.
+   */
+  async bothTaken(
+    inTurn: <T>(work: () => Promise<T>) => Promise<T | undefined> = (work) =>
+      work(),
+  ): Promise<PrintEnd | undefined> {
+    const [waiting, ...rest] = this.#taken;
+    this.#taken = rest;
+    if (waiting === undefined) return undefined;
+
+    if (waiting.print === true) {
+      return inTurn(() =>
+        this.print(waiting.storage, waiting.source, waiting.path, false, true),
+      );
+    }
+    const answered = await inTurn(() =>
+      this.#sending(waiting.storage, waiting.source, waiting.path, false, true),
+    );
+    const fault = answered?.fault;
+
+    return fault === undefined ? undefined : { fault };
   }
 
   /**
@@ -371,7 +416,21 @@ export class Transfers {
     source: string,
     path: string,
     replace = false,
+    keepBoth = false,
   ): Promise<SentFile | undefined> {
+    return (await this.#sending(storage, source, path, replace, keepBoth)).sent;
+  }
+
+  // One send request, answered as what was sent or the fault it failed with,
+  // so a caller never has to read `error` after the await. One that waits in
+  // `taken` or was reset answers neither.
+  async #sending(
+    storage: string,
+    source: string,
+    path: string,
+    replace: boolean,
+    keepBoth = false,
+  ): Promise<{ sent?: SentFile; fault?: DataFault | undefined }> {
     const resets = this.#resets;
     this.#error = undefined;
     try {
@@ -382,8 +441,9 @@ export class Transfers {
         source,
         path,
         replace,
+        keepBoth,
       );
-      if (resets !== this.#resets) return undefined;
+      if (resets !== this.#resets) return {};
       const row = rowOf(answered.transfer);
       const held = this.#rows.find((one) => one.transferId === row.transferId);
       this.#hold([
@@ -396,13 +456,12 @@ export class Transfers {
         this.#landed(row.path);
       }
 
-      return answered;
+      return { sent: answered };
     } catch (thrown) {
-      if (resets === this.#resets) {
-        this.#failed(thrown, replace, { storage, source, path });
-      }
+      if (resets !== this.#resets) return {};
+      this.#failed(thrown, replace || keepBoth, { storage, source, path });
 
-      return undefined;
+      return { fault: this.#error };
     }
   }
 
@@ -421,11 +480,17 @@ export class Transfers {
     source: string,
     path: string,
     replace = false,
+    keepBoth = false,
   ): Promise<PrintEnd | undefined> {
     return this.#printing(
-      { deviceId: this.#deviceId, path, storage, source, replace },
+      { deviceId: this.#deviceId, path, storage, source, replace, keepBoth },
       (thrown) => {
-        this.#failed(thrown, replace, { storage, source, path, print: true });
+        this.#failed(thrown, replace || keepBoth, {
+          storage,
+          source,
+          path,
+          print: true,
+        });
       },
     );
   }
@@ -458,12 +523,13 @@ export class Transfers {
   }
 
   // A send or print the server refused. A name the printer holds waits in
-  // `taken` for the person's answer, unless this send already replaced it;
+  // `taken` for the person's answer, unless this send already carried one;
   // anything else is the store's error.
-  #failed(thrown: unknown, replace: boolean, waiting: TakenName): void {
+  #failed(thrown: unknown, answered: boolean, waiting: TakenName): void {
     const fault = faultOf(thrown);
-    if (fault.code === FILE_NAME_TAKEN && !replace) {
-      this.#taken = [...this.#taken, waiting];
+    if (fault.code === FILE_NAME_TAKEN && !answered) {
+      const readOnly = fault.params.read_only === true;
+      this.#taken = [...this.#taken, { ...waiting, readOnly }];
     } else {
       this.#error = fault;
     }

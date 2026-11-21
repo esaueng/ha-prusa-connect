@@ -14,7 +14,7 @@ const (
 	// VocabularyName is what the published index and the API path call this set.
 	VocabularyName = "event-types"
 	// VocabularyVersion is the content version of the core event-type set.
-	VocabularyVersion = "3.8.0"
+	VocabularyVersion = "3.9.0"
 	// VocabularyFormat is the shape of a published event-type entry.
 	VocabularyFormat = "1.0"
 
@@ -46,6 +46,9 @@ const (
 	// TypeDeviceIssuesChanged reports what the host has found wrong with one
 	// device changing.
 	TypeDeviceIssuesChanged = CoreNamespace + "device.issues.changed"
+	// TypeDeviceStateChanged reports the word a device reports for what it
+	// is doing changing, such as READY to PRINTING.
+	TypeDeviceStateChanged = CoreNamespace + "device.state.changed"
 	// TypeDeviceTelemetrySampled reports one measurement of a device.
 	TypeDeviceTelemetrySampled = CoreNamespace + "device.telemetry.sampled"
 	// TypeDeviceRecordChanged reports the stored record of one device changing.
@@ -221,6 +224,20 @@ var typeDocs = []TypeDoc{
 			"title, are folded into one frame that carries what they settled on, so a module that " +
 			"sends a message per frame sends one. A departure is not repeated here: the device's " +
 			"departure is its own event.",
+	},
+	{
+		Type:    TypeDeviceStateChanged,
+		Class:   ClassState,
+		Summary: "The word a device reports for what it is doing changed.",
+		Description: "Carries the device, the connector it arrived through, and the state before and after, " +
+			"as the machine spells them, such as READY and PRINTING. It fires when the value at /state " +
+			"differs from the one held. The first state of a device this server holds none for comes " +
+			"with from empty, and a device repeating the state it is in fires nothing. The same value is " +
+			"also published as com.prusa.connect.device.telemetry.sampled at /state; this frame exists " +
+			"so a reader that waits for a device to come to rest, such as a print queue, need not read " +
+			"every measurement of every device to find the few that change its state. It is a state " +
+			"event rather than telemetry, because a reader that missed it would wait for a change that " +
+			"already happened.",
 	},
 	{
 		Type:    TypeDeviceTelemetrySampled,

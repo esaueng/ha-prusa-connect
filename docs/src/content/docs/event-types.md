@@ -19,7 +19,7 @@ A type outside that namespace belongs to whoever owns it. A plugin declares the 
 
 ## Vocabulary version
 
-This build carries `event-types` version `3.8.0`, in format `1.0`, and closes the namespace `com.prusa.connect.`. The content version moves when a type is added, retired or redefined; the format version moves when the shape of an entry changes.
+This build carries `event-types` version `3.9.0`, in format `1.0`, and closes the namespace `com.prusa.connect.`. The content version moves when a type is added, retired or redefined; the format version moves when the shape of an entry changes.
 
 ## What a type name may be
 
@@ -70,6 +70,14 @@ What the host has found wrong with one device changed.
 - **class** `state`
 
 Carries the device and its whole issue list, worst first, in the shape the device listing carries, and the dialog the device is waiting on a person for, when it waits for one. A reader holding the device replaces both, and a reader that missed a frame is correct again on the next. Changes that arrive together, such as a dialog's id and its title, are folded into one frame that carries what they settled on, so a module that sends a message per frame sends one. A departure is not repeated here: the device's departure is its own event.
+
+### `com.prusa.connect.device.state.changed` {#com-prusa-connect-device-state-changed}
+
+The word a device reports for what it is doing changed.
+
+- **class** `state`
+
+Carries the device, the connector it arrived through, and the state before and after, as the machine spells them, such as READY and PRINTING. It fires when the value at /state differs from the one held. The first state of a device this server holds none for comes with from empty, and a device repeating the state it is in fires nothing. The same value is also published as com.prusa.connect.device.telemetry.sampled at /state; this frame exists so a reader that waits for a device to come to rest, such as a print queue, need not read every measurement of every device to find the few that change its state. It is a state event rather than telemetry, because a reader that missed it would wait for a change that already happened.
 
 ### `com.prusa.connect.device.telemetry.sampled` {#com-prusa-connect-device-telemetry-sampled}
 

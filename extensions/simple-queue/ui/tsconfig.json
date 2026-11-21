@@ -1,0 +1,25 @@
+{
+  "extends": "@prusa/frontend-standards/tsconfig.json",
+  "compilerOptions": {
+    "types": ["svelte", "vite/client", "node"],
+    // The two linked packages are read from their sources, so this module
+    // type-checks against the library in this checkout rather than against a
+    // `dist/` somebody has to build first. `simple-queue-client` is not here: it
+    // is this module's own package and it is built before this one, so its
+    // declarations are read the way a published package's are.
+    "paths": {
+      "@prusa/connect": ["../../../packages/typescript/src/index.ts"],
+      "@prusa/connect-ui": ["../../../packages/svelte/src/index.ts"],
+      "@prusa/connect-ui/build": ["../../../packages/svelte/build/module.ts"],
+      "@prusa/connect-ui/*": ["../../../packages/svelte/src/*/index.ts"]
+    }
+  },
+  "include": [
+    "src",
+    ".storybook/*.ts",
+    "scripts",
+    "*.config.ts",
+    "*.config.js",
+    ".prettierrc.js"
+  ]
+}

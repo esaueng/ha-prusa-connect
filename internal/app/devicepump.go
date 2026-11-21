@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/prusa3d/prusa-connect/internal/kernel/deviceissue"
+	"github.com/prusa3d/prusa-connect/sdk/connectorapi"
 	"github.com/prusa3d/prusa-connect/sdk/event"
 )
 
@@ -42,18 +43,12 @@ func (d *devices) pump(entry *device) {
 				return
 			}
 
-			// The event carries what the host kept, so the stream and the
-			// stored tree say the same thing. A patch the host kept nothing
-			// of reaches no subscriber, and is counted on the entry.
-			held, kept := entry.record(patch)
+			path, kept := d.sampled(context.Background(), entry, patch)
 			if !kept {
 				continue
 			}
 
-			d.publish(context.Background(), entry.id, event.TypeDeviceTelemetrySampled,
-				event.ClassTelemetry, held.Path, sampleOf(held))
-
-			if strings.HasPrefix(held.Path, deviceissue.DialogSubtree) {
+			if strings.HasPrefix(path, deviceissue.DialogSubtree) {
 				issues.touch()
 			}
 
@@ -77,4 +72,40 @@ func (d *devices) pump(entry *device) {
 			d.printerChangedFile(entry, change)
 		}
 	}
+}
+
+// sampled keeps one patch and tells the stream of it, and answers the path the
+// host kept it under. A patch the host kept nothing of reaches no subscriber,
+// and is counted on the entry.
+//
+// The event carries what the host kept, so the stream and the stored tree say
+// the same thing. A change of the state is told as an event of its own, and
+// the same word repeated is not one.
+func (d *devices) sampled(ctx context.Context, entry *device, patch connectorapi.StatePatch) (string, bool) {
+	// Read before the patch is kept, so a change is told apart from a repeat.
+	before, isState := "", patch.Path == printerStatePath
+	if isState {
+		before = entry.stateText()
+	}
+
+	held, kept := entry.record(patch)
+	if !kept {
+		return "", false
+	}
+
+	d.publish(ctx, entry.id, event.TypeDeviceTelemetrySampled,
+		event.ClassTelemetry, held.Path, sampleOf(held))
+
+	if !isState {
+		return held.Path, true
+	}
+
+	if after := jobText(held.Value); after != "" && after != before {
+		d.publish(ctx, entry.id, event.TypeDeviceStateChanged,
+			event.ClassState, "", encoded(event.StateChanged{
+				DeviceID: entry.id, Driver: entry.driver, From: before, To: after,
+			}))
+	}
+
+	return held.Path, true
 }

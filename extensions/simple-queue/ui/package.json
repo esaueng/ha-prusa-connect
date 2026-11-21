@@ -1,0 +1,51 @@
+{
+  "name": "simple-queue-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The browser half of the print queue module: the Queue tab of each printer, a line on each printer card, a section of the print dialog and the Print queue page, built into the bundle the host serves.",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:svelte": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run check:svelte && pnpm run check:stories && pnpm run test",
+    "storybook": "storybook dev -p 6007",
+    "build-storybook": "storybook build -o storybook-static",
+    "check:stories": "node scripts/check-stories.mjs"
+  },
+  "dependencies": {
+    "@lucide/svelte": "1.58.0",
+    "@prusa/connect": "0.1.0",
+    "@prusa/connect-ui": "0.1.0",
+    "simple-queue-client": "link:../client"
+  },
+  "devDependencies": {
+    "@prusa/frontend-standards": "0.1.0",
+    "@storybook/addon-svelte-csf": "5.1.5",
+    "@storybook/svelte": "10.6.2",
+    "@storybook/svelte-vite": "10.6.2",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.5",
+    "@vitest/browser-playwright": "5.0.5",
+    "eslint": "10.12.0",
+    "playwright": "1.64.1",
+    "prettier": "3.9.10",
+    "storybook": "10.6.2",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5",
+    "vitest-browser-svelte": "3.1.0"
+  },
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

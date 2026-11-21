@@ -13,6 +13,7 @@
 // what a module will add before installing it, and that is not true if the
 // running code can add a pane the block never named.
 import type { Component } from 'svelte';
+import { SvelteSet } from 'svelte/reactivity';
 
 import { t } from '../i18n';
 import { modulePageHref } from '../module-href';
@@ -95,6 +96,11 @@ export interface DeclaredEntry {
   fileTypes?: readonly string[] | undefined;
   /** On a device slot, the devices the entry is drawn for. Absent is every device (ADR-20261110-5np). */
   devices?: DeviceSelector | undefined;
+  /**
+   * On a printer tab, whether the manifest asks for the tab's page to be
+   * cross-origin isolated. Absent is not isolated.
+   */
+  crossOriginIsolated?: boolean | undefined;
 }
 
 /** A declared entry of an action slot, with the fields only an action carries. */
@@ -211,6 +217,28 @@ const sectionOf = (
   | undefined => (sections ?? []).find((section) => section.id === id);
 
 /**
+ * Files a module hands to the page of one printer, to be sent there the way a
+ * file dropped on that page is, with the module's device-upload-action entry
+ * running on each while it is on its way. `files` come from the person's
+ * computer and are asked about first; `stored` are files in a storage of
+ * this server and go at once.
+ */
+export interface UploadRequest {
+  readonly namespace: string;
+  /** The id of the module's device-upload-action entry. */
+  readonly action: string;
+  readonly deviceId: string;
+  readonly files: readonly File[];
+  readonly stored?: readonly StoredFileRef[] | undefined;
+}
+
+/** A file in a storage of this server. */
+export interface StoredFileRef {
+  readonly storage: string;
+  readonly path: string;
+}
+
+/**
  * Reactive lists and nothing else. A component reading `registry.pages()`
  * inside a `$derived` re-runs when a module registers, so the registry needs
  * no listener list of its own.
@@ -220,6 +248,12 @@ const sectionOf = (
  * share one set of registrations.
  */
 export class SlotRegistry {
+  // Files modules asked to send to a printer, oldest first, waiting for that
+  // printer's page to ask the person how.
+  #uploads = $state.raw<readonly UploadRequest[]>([]);
+  // The printers whose page is open. Only an open page asks, so a request
+  // for any other printer is dropped and never waits for a later visit.
+  readonly #uploadPages = new SvelteSet<string>();
   #pages = $state<RegisteredPage[]>([]);
   #sections = $state<RegisteredSection[]>([]);
   #actions = $state<RegisteredAction[]>([]);
@@ -236,6 +270,46 @@ export class SlotRegistry {
   #declared = $state<Record<string, ModuleContributes>>({});
   // `<slot key>/<identity>` entries an operator hid, per namespace.
   #hidden = $state<Record<string, readonly string[]>>({});
+
+  /**
+   * Says the page of a printer is open, and answers how to say it closed.
+   * Closing drops what still waits for that printer.
+   */
+  openUploads(deviceId: string): () => void {
+    this.#uploadPages.add(deviceId);
+
+    return () => {
+      this.#uploadPages.delete(deviceId);
+      this.#uploads = this.#uploads.filter(
+        (request) => request.deviceId !== deviceId,
+      );
+    };
+  }
+
+  /**
+   * Holds a module's files for the page of the printer they go to, behind
+   * any request already waiting. It answers false, and holds nothing, when
+   * that page is not open.
+   */
+  requestUpload(request: UploadRequest): boolean {
+    if (!this.#uploadPages.has(request.deviceId)) return false;
+    this.#uploads = [...this.#uploads, request];
+
+    return true;
+  }
+
+  /** The oldest request waiting for one printer. */
+  uploadFor(deviceId: string): UploadRequest | undefined {
+    return this.#uploads.find((request) => request.deviceId === deviceId);
+  }
+
+  /** Hands the oldest request waiting for one printer to its page, once. */
+  takeUpload(deviceId: string): UploadRequest | undefined {
+    const request = this.uploadFor(deviceId);
+    this.#uploads = this.#uploads.filter((held) => held !== request);
+
+    return request;
+  }
 
   /**
    * Records what one module's manifest allows. Nothing registers until this
@@ -563,6 +637,7 @@ export class SlotRegistry {
           title: entry.title,
           fileTypes: entry.file_types,
           devices: entry.devices,
+          crossOriginIsolated: entry.cross_origin_isolated,
         })),
     );
   }
@@ -582,6 +657,7 @@ export class SlotRegistry {
           title: entry.title,
           fileTypes: entry.file_types,
           devices: entry.devices,
+          crossOriginIsolated: entry.cross_origin_isolated,
         })),
       );
   }

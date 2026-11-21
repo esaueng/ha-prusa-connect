@@ -498,6 +498,8 @@ type ResourceSection struct {
 	FileTypes []string `json:"file_types,omitempty" doc:"For a slot handed a file, the file types the entry is drawn for: a lowercase extension with its dot, such as .3mf. Absent for every file." maxItems:"16" nullable:"false"`
 	// Devices limits an entry of a slot handed a device.
 	Devices *ResourceDeviceSelector `json:"devices,omitempty" doc:"On a device slot, the devices the entry is drawn for. Absent for every device."`
+	// CrossOriginIsolated is the manifest's cross_origin_isolated.
+	CrossOriginIsolated bool `json:"cross_origin_isolated,omitempty" doc:"On a printer tab, true when the module's manifest asks for the tab's page to be cross-origin isolated. The server then sends that page with both isolation headers unless the tab is hidden, and a client opens and leaves the tab with a full page load. Absent otherwise."`
 }
 
 // ResourceCard is one card a module offers for a dashboard. The page draws the

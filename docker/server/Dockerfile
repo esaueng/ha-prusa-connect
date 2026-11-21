@@ -85,6 +85,9 @@ RUN cd extensions/server-slicing/client && pnpm install --frozen-lockfile && pnp
 COPY extensions/materials ./extensions/materials
 RUN cd extensions/materials/client && pnpm install --frozen-lockfile && pnpm run build && \
     cd ../ui && pnpm install --frozen-lockfile && pnpm run build && test -f dist/ui/index.js
+COPY extensions/simple-queue ./extensions/simple-queue
+RUN cd extensions/simple-queue/client && pnpm install --frozen-lockfile && pnpm run build && \
+    cd ../ui && pnpm install --frozen-lockfile && pnpm run build && test -f dist/ui/index.js
 
 # Build Go server (matches Makefile: go build -o bin/server ./cmd/prusa-connect)
 # The -trixie variant matches the debian:trixie-slim runtime stage below. The
@@ -223,6 +226,12 @@ RUN export GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM="${TARGETVARIANT#v}" && \
     BINARY="/tmp/materials_$(go env GOOS)_$(go env GOARCH)" && \
     CGO_ENABLED=0 go -C extensions/materials build -o "$BINARY" . && \
     sh extensions/scripts/pack-release.sh extensions/materials/ui/dist "$BINARY" /opt/modules/materials
+# The print queue release, laid out the same way.
+COPY --from=extensions-builder /app/extensions/simple-queue/ui/dist ./extensions/simple-queue/ui/dist
+RUN export GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM="${TARGETVARIANT#v}" && \
+    BINARY="/tmp/simple-queue_$(go env GOOS)_$(go env GOARCH)" && \
+    CGO_ENABLED=0 go -C extensions/simple-queue build -o "$BINARY" . && \
+    sh extensions/scripts/pack-release.sh extensions/simple-queue/ui/dist "$BINARY" /opt/modules/simple-queue
 
 # The Fractal release. It has no web page, so its bundle is the manifest and
 # the route document alone. Its NATS dependencies are not the core's, so this
@@ -257,6 +266,7 @@ COPY --from=extension-packager /opt/modules/threemf /opt/modules/threemf
 COPY --from=extension-packager /opt/modules/server-slicing /opt/modules/server-slicing
 COPY --from=extension-packager /opt/modules/materials /opt/modules/materials
 COPY --from=extension-packager /opt/modules/fractal /opt/modules/fractal
+COPY --from=extension-packager /opt/modules/simple-queue /opt/modules/simple-queue
 
 # The root certificates the server verifies an https peer against: the module
 # marketplace, the releases it points at, and an OIDC provider. trixie-slim

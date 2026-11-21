@@ -292,6 +292,10 @@ func appPlaces(ui *manifest.UI) []string {
 				line += ", but only on the printer this server runs on"
 			}
 
+			if entry.isolated {
+				line += ", as a cross-origin isolated page"
+			}
+
 			lines = append(lines, line)
 		}
 	}
@@ -313,6 +317,7 @@ type slotEntry struct {
 	title     string
 	fileTypes []string
 	devices   manifest.DeviceSelector
+	isolated  bool
 }
 
 func slotEntries(c manifest.Contributes, slot manifest.SlotName) []slotEntry {
@@ -333,7 +338,10 @@ func slotEntries(c manifest.Contributes, slot manifest.SlotName) []slotEntry {
 	}
 
 	for _, section := range c.Sections[slot] {
-		out = append(out, slotEntry{title: section.Title, fileTypes: section.FileTypes, devices: section.Devices})
+		out = append(out, slotEntry{
+			title: section.Title, fileTypes: section.FileTypes, devices: section.Devices,
+			isolated: section.CrossOriginIsolated,
+		})
 	}
 
 	for _, action := range c.Actions[slot] {

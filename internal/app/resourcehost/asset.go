@@ -215,10 +215,11 @@ func sectionsOf(declared []manifest.Section) []httpapi.ResourceSection {
 	out := make([]httpapi.ResourceSection, 0, len(declared))
 	for _, section := range declared {
 		out = append(out, httpapi.ResourceSection{
-			ID:        section.ID,
-			Title:     section.Title,
-			FileTypes: section.FileTypes,
-			Devices:   devicesOf(section.Devices),
+			ID:                  section.ID,
+			Title:               section.Title,
+			FileTypes:           section.FileTypes,
+			Devices:             devicesOf(section.Devices),
+			CrossOriginIsolated: section.CrossOriginIsolated,
 		})
 	}
 

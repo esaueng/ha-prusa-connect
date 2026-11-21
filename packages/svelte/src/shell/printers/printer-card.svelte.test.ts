@@ -23,6 +23,8 @@ const row = (over: Partial<PrinterRow> = {}): PrinterRow => ({
   nozzleTarget: 230,
   bed: 60,
   bedTarget: 60,
+  chamber: undefined,
+  chamberTarget: undefined,
   material: 'PETG',
   statusNote: undefined,
   statusAction: undefined,
@@ -62,18 +64,24 @@ describe('PrinterCard', () => {
     await expect.element(page.getByText('42%')).toBeVisible();
   });
 
+  // Where the card shows the state, its Idle says there is no job and the
+  // line goes; a card without the state says it on the line.
   it('says there is no job rather than leaving the line empty', async () => {
-    await render(PrinterCard, {
-      props: {
-        row: row({ jobName: undefined, progress: null, state: 'IDLE' }),
-        shows: everything,
-      },
+    const idle = row({ jobName: undefined, progress: null, state: 'IDLE' });
+    const shown = await render(PrinterCard, {
+      props: { row: idle, shows: everything },
     });
+    await expect.element(page.getByText('Idle', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('No print running')).not.toBeVisible();
+    await shown.unmount();
 
+    await render(PrinterCard, {
+      props: { row: idle, shows: (field) => field !== 'state' },
+    });
     await expect.element(page.getByText('No print running')).toBeVisible();
   });
 
-  it('says a silent machine reported nothing at all', async () => {
+  it('says a silent printer cannot tell how its print stands', async () => {
     await render(PrinterCard, {
       props: {
         row: row({
@@ -87,7 +95,28 @@ describe('PrinterCard', () => {
       },
     });
 
-    await expect.element(page.getByText('No data reported')).toBeVisible();
+    await expect
+      .element(page.getByText('Print status unavailable'))
+      .toBeVisible();
+  });
+
+  // A CORE One reports the air inside it. A printer with no chamber gets no
+  // box, so its card shows no dash for a reading it never has.
+  it('shows the chamber only for a printer that has one', async () => {
+    const shown = await render(PrinterCard, {
+      props: {
+        row: row({ chamber: 38, chamberTarget: 45 }),
+        shows: everything,
+      },
+    });
+    await expect.element(page.getByText('Chamber')).toBeInTheDocument();
+    expect(shown.container.textContent).toMatch(/38°\s*\/45°/);
+    await shown.unmount();
+
+    const { container } = await render(PrinterCard, {
+      props: { row: row(), shows: everything },
+    });
+    expect(container.textContent).not.toContain('Chamber');
   });
 
   it('drops a field the reader put away', async () => {

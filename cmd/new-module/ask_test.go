@@ -190,7 +190,7 @@ func TestTheQuestionsWriteWhatTheSummaryShowed(t *testing.T) {
 		"",                                  // the kind: Enter takes UI only
 		"shelf",                             // the name
 		"https://github.com/acme/shelf.git", // the address, pasted
-		"1,9",                               // a page and a settings pane
+		"1,11",                              // a page and a settings pane
 		"full",                              // a folder that is not empty
 		"",                                  // then the default
 		"3",                                 // no git

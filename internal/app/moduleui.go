@@ -1,12 +1,14 @@
 package app
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/prusa3d/prusa-connect/internal/app/resource"
 	"github.com/prusa3d/prusa-connect/internal/app/resourcehost"
 	"github.com/prusa3d/prusa-connect/internal/kernel/ref"
 	"github.com/prusa3d/prusa-connect/internal/transport/http/httpapi"
+	"github.com/prusa3d/prusa-connect/sdk/manifest"
 )
 
 // modulePlane is the module plane as the HTTP surface reads it: a process
@@ -47,6 +49,64 @@ func (p modulePlane) Module(namespace string) (httpapi.ModuleSurface, bool) {
 	}
 
 	return httpapi.ModuleSurface{}, false
+}
+
+// IsolatedTab reports whether an enabled, running module of the namespace
+// declares this printer tab with cross_origin_isolated and nobody hides it.
+// It reads no caller, because the entry document is the same for every
+// viewer. It asks the host on every call, so a change to the module shows at
+// the next request.
+func (p modulePlane) IsolatedTab(namespace, tab string) bool {
+	if p.host == nil || p.store == nil {
+		return false
+	}
+
+	return isolatedAmong(p.store.Document().Instances, p.host.UI, namespace, tab)
+}
+
+// isolatedAmong is IsolatedTab over a list of declarations. Only the
+// instance the host runs as the namespace's module answers.
+func isolatedAmong(
+	instances []resource.Declaration, uiOf func(ref.Ref) (httpapi.ResourceUI, bool), namespace, tab string,
+) bool {
+	for _, declared := range instances {
+		if owner, isolated := tabIsolation(declared, uiOf, namespace, tab); owner {
+			return isolated
+		}
+	}
+
+	return false
+}
+
+// tabIsolation reads one declared instance. owner is whether it is the
+// enabled module of the namespace that the host runs. isolated is whether its
+// bundle declares the tab with cross_origin_isolated and nobody hides it. The
+// devices selector is not read, so the tab is isolated on every printer.
+func tabIsolation(
+	declared resource.Declaration, uiOf func(ref.Ref) (httpapi.ResourceUI, bool), namespace, tab string,
+) (owner, isolated bool) {
+	held, isModule := declared.ModuleNamespace()
+	if !isModule || held != namespace || !declared.Spec.Enabled {
+		return false, false
+	}
+
+	surface, running := uiOf(declared.Ref)
+	if !running {
+		return false, false
+	}
+
+	hidden := manifest.SlotDeviceTab.Key() + "/" + tab
+	if slices.Contains(declared.Spec.HiddenContributions, hidden) || slices.Contains(surface.Hidden, hidden) {
+		return true, false
+	}
+
+	for _, entry := range surface.Contributes.DeviceTab {
+		if entry.ID == tab {
+			return true, entry.CrossOriginIsolated
+		}
+	}
+
+	return true, false
 }
 
 // Root is the surface a root-mounted path belongs to. An asset instance

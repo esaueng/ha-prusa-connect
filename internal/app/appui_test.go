@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -20,7 +22,7 @@ import (
 func TestTheAppIsMountedOnlyWhereTheConfigurationAsksForIt(t *testing.T) {
 	t.Parallel()
 
-	_, carried := httpapi.AppMount()
+	_, carried := httpapi.AppMount(httpapi.AppOptions{})
 
 	beside := []httpapi.Mount{{Pattern: "/p/ws", Handler: nil, Reason: "a device wire"}}
 
@@ -28,8 +30,8 @@ func TestTheAppIsMountedOnlyWhereTheConfigurationAsksForIt(t *testing.T) {
 	off := on
 	off.Enabled = new(false)
 
-	mountedOn, stateOn := withCoreApp(beside, on)
-	mountedOff, stateOff := withCoreApp(beside, off)
+	mountedOn, stateOn := withCoreApp(beside, on, nil, httpapi.AppMount)
+	mountedOff, stateOff := withCoreApp(beside, off, nil, httpapi.AppMount)
 
 	require.Len(t, mountedOff, len(beside), "the app was mounted on a deployment that switched it off")
 
@@ -46,11 +48,19 @@ func TestTheAppIsMountedOnlyWhereTheConfigurationAsksForIt(t *testing.T) {
 	require.Len(t, mountedOn, len(beside)+1, "the app was not mounted on a build that carries it")
 }
 
+// testAppMount is httpapi.AppMount over the fixture bundle httpapi's own tests
+// serve, for Options.appMount.
+func testAppMount(opts httpapi.AppOptions) (httpapi.Mount, bool) {
+	files := os.DirFS(filepath.Join("..", "transport", "http", "httpapi", "testdata", "appbundle"))
+
+	return httpapi.Mount{Pattern: "/*", Handler: httpapi.AppHandler(files, opts), Reason: "the fixture app"}, true
+}
+
 // TestThePageIsToldHowToLookWhateverTheAnswerIs covers what GET /api/v1/ui
 // sends. Enabled is where the app stands and not what the file says, so a
 // client reading it from a build with no app is told the page is not here
-// rather than told to expect one. The four appearance keys travel either way: a
-// deployment serving its own page still reads the name and the brand this
+// rather than told to expect one. The three appearance keys travel either way:
+// a deployment serving its own page still reads the name and the theme this
 // server was configured with.
 func TestThePageIsToldHowToLookWhateverTheAnswerIs(t *testing.T) {
 	t.Parallel()
@@ -69,7 +79,6 @@ func TestThePageIsToldHowToLookWhateverTheAnswerIs(t *testing.T) {
 		require.Equal(t, "Workshop floor", settings.Title)
 		require.Equal(t, config.DefaultLanguage, settings.DefaultLanguage)
 		require.Equal(t, config.DefaultTheme, settings.Theme)
-		require.Equal(t, config.DefaultSkin, settings.Skin)
 		require.Equal(t, config.DefaultDiagnosticsSendURL, settings.DiagnosticsSendURL)
 	}
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
@@ -18,7 +18,7 @@ import {
   EVERY_SLOT_ENTRY,
   EVERY_SLOT_NAMESPACE,
 } from '../../test/every-slot';
-import { json, stubClient, stubFetch } from '../../test/stub';
+import { json, type Routes, stubClient, stubFetch } from '../../test/stub';
 import WithSlots from '../../test/with-slots.svelte';
 // Not exported from the package: the same fixture the registry's own tests use.
 import PlainSection from '../../../../packages/svelte/src/test/plain-section.svelte';
@@ -104,6 +104,112 @@ const drawPrinterDetail = async (
   );
 
   await render(WithSlots, { props: { registry, screen: PrinterDetail, ctx } });
+};
+
+// The device-file-action outlet is in the menu of each file on the Files
+// tab, so its draw opens that tab on a printer holding one print file.
+const drawPrinterFiles = async (registry: SlotRegistry): Promise<void> => {
+  const routes: Routes = {
+    'GET /api/v1/devices': json(200, {
+      items: [
+        {
+          id: 'a',
+          name: 'Printer a',
+          kind: 'printer',
+          model: 'MK4S',
+          connected: true,
+          labels: {},
+          actions: ['observe', 'operate'],
+          capabilities: ['core.command.start_print'],
+          state: { '/state': 'IDLE' },
+        },
+      ],
+      total: 1,
+    }),
+    'GET /api/v1/devices/a/files': json(200, {
+      items: [
+        {
+          folder: false,
+          name: 'bracket.bgcode',
+          path: 'usb/bracket.bgcode',
+          read_only: false,
+          size: 2048,
+        },
+      ],
+    }),
+  };
+  // The Files tab reads the printer's files through the page's own fetch.
+  vi.stubGlobal('fetch', stubFetch(routes).fetch);
+  const ctx = appContext(routes, { params: { id: 'a', tab: 'files' } });
+
+  await render(WithSlots, { props: { registry, screen: PrinterDetail, ctx } });
+  await page
+    .getByRole('button', { name: 'Actions for bracket.bgcode' })
+    .click();
+};
+
+// The device-upload-action outlet is a choice in the question a file dropped
+// on a printer asks, so its draw drops one file on a printer that takes
+// uploads.
+const drawPrinterDrop = async (registry: SlotRegistry): Promise<void> => {
+  const routes: Routes = {
+    'GET /api/v1/devices': json(200, {
+      items: [
+        {
+          id: 'a',
+          name: 'Printer a',
+          kind: 'printer',
+          model: 'MK4S',
+          connected: true,
+          labels: {},
+          actions: ['observe', 'operate'],
+          capabilities: ['core.command.start_print'],
+          state: { '/state': 'IDLE' },
+        },
+      ],
+      total: 1,
+    }),
+    'GET /api/v1/devices/a/files': json(200, { items: [] }),
+    'GET /api/v1/devices/a/storages': json(200, {
+      items: [
+        {
+          free_space: 1024,
+          mountpoint: '/usb',
+          name: 'usb',
+          read_only: false,
+          type: 'USB',
+        },
+      ],
+      reported: true,
+    }),
+    'GET /api/v1/storages': json(200, {
+      items: [
+        {
+          browse: true,
+          display_name: 'Uploads',
+          download_url: true,
+          move: true,
+          name: 'uploads',
+          ranges: true,
+          write: true,
+        },
+      ],
+    }),
+  };
+  vi.stubGlobal('fetch', stubFetch(routes).fetch);
+  const ctx = appContext(routes, { params: { id: 'a', tab: 'status' } });
+
+  await render(WithSlots, { props: { registry, screen: PrinterDetail, ctx } });
+  await expect
+    .poll(() => document.querySelector('input[type="file"]'), { timeout: 5000 })
+    .not.toBeNull();
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+  const files = new DataTransfer();
+  files.items.add(new File(['G28'], 'bracket.bgcode'));
+  if (input !== null) {
+    input.files = files.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
 };
 
 // An action slot's outlet is inside the header's kebab menu, closed until a
@@ -280,7 +386,17 @@ const DRAW: Record<Screen, (registry: SlotRegistry) => Promise<void>> = {
   'print-dialog': drawPrintDialog,
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('every slot has an outlet on its screen', () => {
+  // Wide enough for the file rows to draw their acts on the row: a
+  // phone-width pane folds them into the row's menu.
+  beforeEach(async () => {
+    await page.viewport(1400, 900);
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -362,13 +478,23 @@ describe('every slot has an outlet on its screen', () => {
           registry,
           `?tab=${EVERY_SLOT_NAMESPACE}.${EVERY_SLOT_ENTRY}`,
         );
+      } else if (slot === 'device-file-action') {
+        await drawPrinterFiles(registry);
+      } else if (slot === 'device-upload-action') {
+        await drawPrinterDrop(registry);
       } else {
         await DRAW[screen](registry);
       }
 
       // An action slot's outlet mounts inside the kebab menu, which starts
       // closed.
-      if (SLOT_FORMS[slot] === 'action') await openMenu();
+      if (
+        SLOT_FORMS[slot] === 'action' &&
+        slot !== 'device-file-action' &&
+        slot !== 'device-upload-action'
+      ) {
+        await openMenu();
+      }
 
       // The first case in the file also waits for the browser to compile
       // the screen, which on a CI runner takes longer than the default second.

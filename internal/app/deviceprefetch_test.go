@@ -17,6 +17,7 @@ import (
 	"github.com/prusa3d/prusa-connect/internal/printer/profile"
 	"github.com/prusa3d/prusa-connect/internal/transport/http/httpapi"
 	"github.com/prusa3d/prusa-connect/sdk/connectorapi"
+	"github.com/prusa3d/prusa-connect/sdk/transferapi"
 )
 
 // walkSession is a printer holding two print files, a model and a folder on
@@ -190,6 +191,43 @@ func TestAListingFetchesThePicturesOfItsPrintFilesOnce(t *testing.T) {
 	_, err = plane.Thumbnail(t.Context(), owner, id, "usb/a.bgcode", 10, 1)
 	require.ErrorContains(t, err, "NO_THUMBNAIL")
 	require.Equal(t, 1, session.askedAbout()["usb/a.bgcode"], "the remembered verdict was not used")
+}
+
+// A printer asked about a file this server is still sending it answers with no
+// picture, under the length and the time the whole file will have. That is
+// not a verdict about the file: nothing is remembered while the transfer
+// runs, so the file is asked about again, and remembered once it has landed.
+func TestAFileStillArrivingIsNotRememberedAsHavingNoPicture(t *testing.T) {
+	t.Parallel()
+
+	session := newWalkSession("SIM-WALK-ARRIVING")
+	plane, id, owner := arriveWalking(t, session, "IDLE")
+
+	origin, err := deviceOrigin(id)
+	require.NoError(t, err)
+
+	_, err = plane.transfers.begin(
+		transferapi.Record{TransferID: "t-1", Device: origin.String(), Destination: "usb/a.bgcode"},
+		owner, func() {})
+	require.NoError(t, err)
+
+	for range 2 {
+		_, err = plane.Thumbnail(t.Context(), owner, id, "usb/a.bgcode", 10, 1)
+		require.ErrorContains(t, err, "NO_THUMBNAIL")
+	}
+
+	require.Equal(t, 2, session.askedAbout()["usb/a.bgcode"],
+		"no picture was remembered for a file that had not landed")
+
+	plane.transfers.end("t-1")
+
+	for range 2 {
+		_, err = plane.Thumbnail(t.Context(), owner, id, "usb/a.bgcode", 10, 1)
+		require.ErrorContains(t, err, "NO_THUMBNAIL")
+	}
+
+	require.Equal(t, 3, session.askedAbout()["usb/a.bgcode"],
+		"a landed file with no picture was asked about again")
 }
 
 // A print names its file by the printer's short name, with no version. The

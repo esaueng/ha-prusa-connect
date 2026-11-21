@@ -10,7 +10,8 @@ import (
 )
 
 // placesManifest is a module.yaml with an entry limited to the printer the
-// server runs on, one limited to a file type, and one limited to neither.
+// server runs on, one limited to a file type and one limited to neither. A
+// tab in it asks for a cross-origin isolated page.
 const placesManifest = `
 name: display
 kind: asset
@@ -26,6 +27,9 @@ ui:
           resident: true
       - id: log
         title: Log
+      - id: panel
+        title: Panel
+        cross_origin_isolated: true
     device_action:
       - id: wake
         title: Wake
@@ -37,9 +41,9 @@ ui:
         file_types: [.3mf]
 `
 
-// An extension page says where each entry of the ui block shows, with the
-// files it is limited to and whether it is limited to the printer the server
-// runs on (ADR-20261110-5np).
+// An extension page says where each entry of the ui block shows. It names the
+// files and the printer an entry is limited to, and whether its page is
+// cross-origin isolated.
 func TestAppPlacesSayWhatAnEntryIsLimitedTo(t *testing.T) {
 	t.Parallel()
 
@@ -52,6 +56,7 @@ func TestAppPlacesSayWhatAnEntryIsLimitedTo(t *testing.T) {
 	want := []string{
 		"**Display**: a tab of its own on each printer's page, but only on the printer this server runs on",
 		"**Log**: a tab of its own on each printer's page",
+		"**Panel**: a tab of its own on each printer's page, as a cross-origin isolated page",
 		"**Wake**: an item in the action menu of each printer's page, but only on the printer this server runs on",
 		"**Plates**: a tab of its own on a file's page, for `.3mf`",
 	}

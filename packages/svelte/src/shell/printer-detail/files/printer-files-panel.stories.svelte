@@ -429,6 +429,81 @@
   />
 </Story>
 
+<!-- Files dropped together go to the printer one after another. -->
+<Story name="Files Waiting For The Printer" asChild>
+  <PrinterFilesPanel
+    {device}
+    {commands}
+    files={source({ entries })}
+    onUpload={receive}
+    uploads={[
+      {
+        id: 'job:1',
+        deviceId: device.id,
+        printerName: device.name,
+        name: 'gasket_set_tpu.bgcode',
+        step: 'sending',
+        progress: null,
+        mine: true,
+        startedBy: undefined,
+        canCancel: false,
+        stopping: false,
+      },
+      {
+        id: 'job:2',
+        deviceId: device.id,
+        printerName: device.name,
+        name: 'spool_holder.bgcode',
+        step: 'waiting',
+        progress: null,
+        mine: true,
+        startedBy: undefined,
+        canCancel: true,
+        stopping: false,
+      },
+    ]}
+    onCancelUpload={() => undefined}
+  />
+</Story>
+
+<!-- The printer holds a file under the first name, so the person is asked
+     and the next file keeps waiting behind it. -->
+<Story name="A File Waiting For An Answer" asChild>
+  <PrinterFilesPanel
+    {device}
+    {commands}
+    files={source({ entries })}
+    onUpload={receive}
+    uploads={[
+      {
+        id: 'job:1',
+        deviceId: device.id,
+        printerName: device.name,
+        name: 'gasket_set_tpu.bgcode',
+        step: 'asking',
+        progress: null,
+        mine: true,
+        startedBy: undefined,
+        canCancel: false,
+        stopping: false,
+      },
+      {
+        id: 'job:2',
+        deviceId: device.id,
+        printerName: device.name,
+        name: 'spool_holder.bgcode',
+        step: 'waiting',
+        progress: null,
+        mine: true,
+        startedBy: undefined,
+        canCancel: true,
+        stopping: false,
+      },
+    ]}
+    onCancelUpload={() => undefined}
+  />
+</Story>
+
 <!-- A transfer outlives the tab it was started from. -->
 <Story name="A Transfer With No Way To Add To It" asChild>
   <PrinterFilesPanel

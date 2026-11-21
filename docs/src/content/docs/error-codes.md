@@ -28,7 +28,7 @@ The machine-readable copy of this page is `docs/errors/error-codes.json`.
 
 Every key a `params` object can carry is in this set, and a code that declares a key outside it fails the build. A key names one fact: the instance a refusal is about is `resource`, carrying the kind, a colon and the name. A key holding a bound names its unit or its subject, so a byte count is `limit_bytes` and a count of streams is `limit_streams`.
 
-`action`, `allowed_characters`, `argument`, `attempts`, `coarsest_step`, `command_id`, `conflicts`, `credential`, `cycle`, `declared`, `device_id`, `event`, `expected_size`, `expires_at`, `extension`, `field`, `file`, `firmware`, `found`, `gcode`, `header`, `held_by`, `id`, `instances`, `job_id`, `kind`, `limit_bytes`, `limit_characters`, `limit_dashboards`, `limit_streams`, `limit_tags`, `location`, `machine_reason`, `max`, `method`, `min`, `mount`, `name`, `object`, `op`, `path`, `preset_models`, `previous_firmware`, `printer_model`, `provider`, `reason`, `relation`, `requires`, `resource`, `retry_after_seconds`, `serves`, `size`, `source`, `state`, `storage_id`, `subject`, `suggested_verb`, `supported`, `tag`, `timeout_ms`, `transfer_id`, `type`, `verb`, `verb_count`, `verbs`, `version`, `word`
+`action`, `allowed_characters`, `argument`, `attempts`, `coarsest_step`, `command_id`, `conflicts`, `credential`, `cycle`, `declared`, `device_id`, `event`, `expected_size`, `expires_at`, `extension`, `field`, `file`, `firmware`, `found`, `gcode`, `header`, `held_by`, `id`, `instances`, `job_id`, `kind`, `limit_bytes`, `limit_characters`, `limit_dashboards`, `limit_streams`, `limit_tags`, `location`, `machine_reason`, `max`, `method`, `min`, `mount`, `name`, `object`, `op`, `path`, `preset_models`, `previous_firmware`, `printer_model`, `provider`, `read_only`, `reason`, `relation`, `requires`, `resource`, `retry_after_seconds`, `serves`, `size`, `source`, `state`, `storage_id`, `subject`, `suggested_verb`, `supported`, `tag`, `timeout_ms`, `transfer_id`, `type`, `verb`, `verb_count`, `verbs`, `version`, `word`
 
 ## core.auth
 
@@ -883,7 +883,7 @@ A file of that name is already on the printer.
 - **status** `409`
 - **retryable** no
 - **occurrence detail** shown
-- **parameters** `device_id`, `path`
+- **parameters** `device_id`, `path`, `read_only`
 - **what to do** Ask the person whether to replace the file on the printer. If they agree, send the same request again with replace set to true, which deletes the printer's file first. Otherwise send the file under another name.
 
 ### `core.printer/FLASH_NOT_SENT` {#core-printer-flash-not-sent}

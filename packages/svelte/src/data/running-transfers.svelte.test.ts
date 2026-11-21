@@ -1,5 +1,5 @@
 import type { StreamEvent } from '@prusa/connect';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createRunningTransfers,
@@ -182,6 +182,57 @@ describe('RunningTransfers', () => {
     expect(second && store.landedAt(second)).toBe(false);
     if (first) store.forget(first);
     expect(first && store.landedAt(first)).toBe(false);
+  });
+
+  it('does not tell a wait that was taken back, for a send that started no transfer', async () => {
+    const { client } = stubClient([[], [runningOf('t-new')]]);
+    const store = createRunningTransfers(client);
+    await store.load();
+    const going = vi.fn();
+    const sent = {
+      deviceId: 'printer-1',
+      storage: 'local',
+      source: 't-new.bgcode',
+    };
+    store.whenOnItsWay(sent, going);
+    store.notOnItsWay(sent);
+
+    await store.apply(started('t-new'));
+
+    expect(going).not.toHaveBeenCalled();
+  });
+
+  it('tells who waits for a file where it lands once it is on its way, and not after a failure', async () => {
+    const { client } = stubClient([[], [runningOf('t-new')], []]);
+    const store = createRunningTransfers(client);
+    await store.load();
+    const going = vi.fn();
+    const failing = vi.fn();
+    store.whenOnItsWay(
+      { deviceId: 'printer-1', storage: 'local', source: 't-new.bgcode' },
+      going,
+    );
+    store.whenOnItsWay(
+      { deviceId: 'printer-1', storage: 'local', source: 't-bad.bgcode' },
+      failing,
+    );
+
+    await store.apply(started('t-new'));
+    await store.apply(progressed('t-new', 512));
+    expect(going).toHaveBeenCalledExactlyOnceWith('usb/t-new.bgcode');
+
+    await store.apply({
+      ...started('t-bad'),
+      type: 'com.prusa.connect.device.transfer.settled',
+      payload: {
+        transfer_id: 't-bad',
+        state: 'failed',
+        storage: 'local',
+        source: 't-bad.bgcode',
+        destination: 'usb/t-bad.bgcode',
+      },
+    } as StreamEvent);
+    expect(failing).not.toHaveBeenCalled();
   });
 
   it('reads what a transfer moved from its settled frame when it held no row', async () => {

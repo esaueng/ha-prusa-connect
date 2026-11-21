@@ -183,6 +183,7 @@ export const printFile = async (
             source: request.source ?? '',
             storage: request.storage,
             ...(request.replace === true ? { replace: true } : {}),
+            ...(request.keepBoth === true ? { keep_both: true } : {}),
           },
   });
 

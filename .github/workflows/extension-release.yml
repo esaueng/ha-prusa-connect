@@ -25,6 +25,7 @@ on:
           - threemf
           - server-slicing
           - materials
+          - simple-queue
       channel:
         description: The marketplace channel
         type: choice

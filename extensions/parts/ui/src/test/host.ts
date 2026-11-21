@@ -242,6 +242,8 @@ export const stubHost = (options: StubOptions = {}): Stub => {
     },
     t: translateFor(NAMESPACE),
     signal: new AbortController().signal,
+    namespace: NAMESPACE,
+    self: 'sink:test',
     pageHref: (path) => modulePageHref(NAMESPACE, path),
     // This module draws no other module's component.
     components: noComponents,

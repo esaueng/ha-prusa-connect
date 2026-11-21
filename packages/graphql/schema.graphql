@@ -200,6 +200,26 @@ type DeviceFile {
   Whether the printer refuses to change this entry.
   """
   read_only: Boolean!
+
+  """
+  The print time the slicer estimated, in whole seconds, as the printer read it out of the file. It is present only on the directory of an answer about one print file, and absent for a printer or a file that names none.
+  """
+  estimated_seconds: Int64
+
+  """
+  The printer the file was sliced for, such as XL2IS. Present only on the directory of an answer about one print file that names it.
+  """
+  printer_model: String
+
+  """
+  The layer height the file was sliced with, in millimetres. Present only on the directory of an answer about one print file that names it.
+  """
+  layer_height_mm: Float
+
+  """
+  The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Present only on the directory of an answer about one print file that names it.
+  """
+  material: String
 }
 
 type DeviceStorages {

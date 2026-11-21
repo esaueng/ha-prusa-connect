@@ -602,6 +602,102 @@ describe('Transfers', () => {
     expect(bodies).toHaveLength(3);
   });
 
+  it('answers the fault of a replace the server refused', async () => {
+    const { client } = stubClient([]);
+    client.sendDeviceFile = (request) => {
+      throw new StubApiError(
+        request.body.replace === true
+          ? 'core.printer/STORAGE_REFUSED'
+          : 'core.printer/FILE_NAME_TAKEN',
+        409,
+      );
+    };
+    const store = createTransfers(client, 'printer-1');
+    await store.send('local', 'a.bgcode', 'usb/a.bgcode');
+
+    const ended = await store.replaceTaken();
+
+    expect(ended?.fault?.code).toBe('core.printer/STORAGE_REFUSED');
+    expect(ended?.answer).toBeUndefined();
+  });
+
+  it('drops the question at once and sends the replacing file in its turn', async () => {
+    const bodies: { source: string; replace?: boolean | undefined }[] = [];
+    const { client } = stubClient([]);
+    client.sendDeviceFile = (request) => {
+      bodies.push({
+        source: request.body.source,
+        replace: request.body.replace,
+      });
+      if (request.body.replace !== true) {
+        throw new StubApiError('core.printer/FILE_NAME_TAKEN', 409);
+      }
+
+      return Promise.resolve({
+        path: request.body.path,
+        transfer: transferOf('t-new', 'queued', 0),
+      });
+    };
+    const store = createTransfers(client, 'printer-1');
+    await store.send('local', 'a.bgcode', 'usb/a.bgcode');
+    let go = (): void => undefined;
+    const turn = new Promise<void>((resolve) => {
+      go = resolve;
+    });
+
+    const replaced = store.replaceTaken(async (work) => {
+      await turn;
+
+      return work();
+    });
+    expect(store.taken).toBeUndefined();
+    expect(bodies).toHaveLength(1);
+
+    go();
+    await replaced;
+    expect(bodies.at(-1)).toEqual({ source: 'a.bgcode', replace: true });
+  });
+
+  it('sends a file kept beside the printer’s in its turn too', async () => {
+    const bodies: {
+      replace?: boolean | undefined;
+      keep?: boolean | undefined;
+    }[] = [];
+    const { client } = stubClient([]);
+    client.sendDeviceFile = (request) => {
+      bodies.push({
+        replace: request.body.replace,
+        keep: request.body.keep_both,
+      });
+      if (request.body.keep_both !== true) {
+        throw new StubApiError('core.printer/FILE_NAME_TAKEN', 409);
+      }
+
+      return Promise.resolve({
+        path: 'usb/a[1].bgcode',
+        transfer: transferOf('t-new', 'queued', 0),
+      });
+    };
+    const store = createTransfers(client, 'printer-1');
+    await store.send('local', 'a.bgcode', 'usb/a.bgcode');
+    let go = (): void => undefined;
+    const turn = new Promise<void>((resolve) => {
+      go = resolve;
+    });
+
+    const kept = store.bothTaken(async (work) => {
+      await turn;
+
+      return work();
+    });
+    expect(store.taken).toBeUndefined();
+    expect(bodies).toHaveLength(1);
+
+    go();
+    await kept;
+    expect(bodies.at(-1)?.keep).toBe(true);
+  });
+
   it('prints a file it sent and reports no fault', async () => {
     const { client, calls } = stubClient([]);
     const store = createTransfers(client, 'printer-1');
@@ -725,6 +821,7 @@ describe('Transfers', () => {
       source: 'a.bgcode',
       path: 'usb/a.bgcode',
       print: true,
+      readOnly: false,
     });
 
     await store.replaceTaken();

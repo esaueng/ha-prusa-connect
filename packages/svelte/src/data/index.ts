@@ -432,6 +432,7 @@ export {
   Transfers,
   type LandedListener,
   type PrintEnd,
+  type TakenName,
   type TransfersOptions,
 } from './transfers.svelte';
 export {

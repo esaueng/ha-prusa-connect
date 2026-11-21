@@ -1,4 +1,6 @@
 export {
+  type DocumentLoad,
+  type DocumentRule,
   type LeaveCheck,
   matchesPattern,
   paramsOf,

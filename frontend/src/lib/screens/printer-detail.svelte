@@ -1,6 +1,6 @@
 <!-- This product's printer page. -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, type Component, type Snippet, untrack } from 'svelte';
 
   import {
     AccessGrants,
@@ -20,7 +20,10 @@
     readDeviceGrants,
     thumbnailByLanding,
     type Transfers,
+    type PrintEnd,
+    type TakenName,
   } from '@prusa/connect-ui/data';
+  import { t } from '@prusa/connect-ui/i18n';
   import {
     STATE_PATH,
     textAt,
@@ -28,15 +31,24 @@
     writableStorageOf,
   } from '@prusa/connect-ui/domain';
   import {
+    ABOVE_ROW_LINK,
+    Card,
+    CardContent,
+    toast,
+  } from '@prusa/connect-ui/primitives';
+  import {
     type CameraFeed,
     type CameraPictures,
     CommandAnnouncer,
     CommandLog,
+    type DropAction,
     DropChoice,
     isPrinterDetailTab,
-    PrinterCommandsPanel,
     PrinterControlsPanel,
     PrinterDetailScreen,
+    PrinterDialog,
+    PrinterTransfers,
+    type PrinterFileEntry,
     PrinterFilesPanel,
     PrinterAccessCard,
     PrinterCamerasPanel,
@@ -51,15 +63,20 @@
   } from '@prusa/connect-ui/shell';
   import {
     getSlotContext,
+    matchesFileType,
     moduleTabs,
+    printerFileRefOf,
+    runSlotAction,
     SlotActions,
     SlotOutlet,
   } from '@prusa/connect-ui/slots';
 
   import { watchCameras } from '../cameras';
   import { client } from '../client';
+  import { browserIsolation } from '../isolation';
   import { jobsOfPrinterHref } from '../routes';
   import type { AppContext } from '../screens';
+  import { pendingSendsOf, printFirst } from '../stores/sends.svelte';
 
   let { ctx }: { ctx: AppContext } = $props();
 
@@ -67,6 +84,17 @@
   const deviceId = $derived(ctx.params.id ?? '');
 
   const slots = getSlotContext();
+  const materialsNamespace = 'com.github.aux.prusa3d.materials';
+  const MaterialsPositions = $derived(
+    slots?.registry.component(materialsNamespace, 'printer-positions') as
+      | Component<{
+          deviceId: string;
+          compact: boolean;
+          toolId?: string;
+          fallback: Snippet;
+        }>
+      | undefined,
+  );
   // A deep link to a module tab never mounts the Status panel, so its own
   // `SlotOutlet` never calls this; this screen must call it itself, or the
   // tab strip would never learn what a module declared.
@@ -170,6 +198,9 @@
   });
 
   $effect(() => telemetry.listen());
+  $effect(() => {
+    void ctx.deviceIssues.read();
+  });
 
   $effect(() => {
     void detail.load();
@@ -313,8 +344,16 @@
       ? asked
       : 'status',
   );
+  // Where the browser can isolate and the strip has an isolated tab, a tab
+  // opens only on Enter, Space or a click.
+  const isolating = browserIsolation().capable;
   const tabsForModules = $derived(
-    declaredTabs.map((row) => ({ ...row, panel: moduleTab })),
+    declaredTabs.map((row) => ({
+      id: row.id,
+      label: row.label,
+      loadsPage: row.isolated && isolating,
+      panel: moduleTab,
+    })),
   );
 
   // Only a transfer says which file on this server a file on the printer is.
@@ -431,8 +470,11 @@
 
   // The files dropped here, held while the person says whether to print
   // them or only send them. Nothing goes up before they answer.
+  // `from` is the module's choice when a module sent the files, such as a
+  // queue's Upload: the question opens with it picked, and asks there whether
+  // to keep a copy, since no drop zone is in sight.
   let dropped = $state.raw<
-    { files: readonly File[]; directory: string } | undefined
+    { files: readonly File[]; directory: string; from?: DropAction } | undefined
   >(undefined);
 
   const onUpload = $derived(
@@ -443,30 +485,168 @@
         },
   );
 
-  // Sends what was dropped, and prints it once it lands when `print` is set.
-  // The dialog closes, and the files are followed where every send is.
-  const deliver = (print: boolean): void => {
+  // Files a module sent to this printer go the way a dropped file goes. The
+  // request waits until the printer's drives are read. A printer that can take
+  // no file says why here, because the module's tab shows no drop zone to say
+  // it in.
+  $effect(() => slots?.registry.openUploads(deviceId));
+
+  $effect(() => {
+    const request = slots?.registry.uploadFor(deviceId);
+    if (request === undefined) return;
+    const block = uploadBlock;
+    const to = drive;
+    if (block === undefined && to === undefined) return;
+    untrack(() => {
+      slots?.registry.takeUpload(deviceId);
+      if (block !== undefined || to === undefined) {
+        const said = block ?? 'storagesUnknown';
+        toast.error(t(`printerDetail.uploadBlocked.${said}.title`), {
+          description: t(`printerDetail.uploadBlocked.${said}.note`),
+        });
+
+        return;
+      }
+      const from = slots?.registry
+        .declaredActions('device-upload-action')
+        .find(
+          (entry) =>
+            entry.namespace === request.namespace &&
+            entry.id === request.action,
+        );
+      // A choice the module never declared, or one an operator hid, has
+      // nothing to run on the files, so nothing is sent and the person is
+      // told.
+      if (from === undefined) {
+        toast.error(t('app.printerDetail.undeclaredChoice.title'), {
+          description: t('app.printerDetail.undeclaredChoice.note'),
+        });
+
+        return;
+      }
+      if (request.files.length > 0) {
+        dropped = { files: request.files, directory: to, from };
+      }
+      for (const stored of request.stored ?? []) {
+        sendStored(stored.storage, stored.path, to, from);
+      }
+    });
+  });
+
+  // The printer takes one file at a time, and the server refuses a second
+  // send while one runs. So the stored files of one request go one after
+  // another: each waits for the answer to the one before, which comes when
+  // that transfer has ended.
+  let storedSends: Promise<unknown> = Promise.resolve();
+
+  // Copies a stored file to the top of the printer's drive and runs the
+  // module's choice on it while it is on its way, under the name it lands at.
+  // A name the printer holds is asked about by the question below, which runs
+  // the choice once the person's answer sends the file, or on the printer's
+  // own file when they keep it. The printer and its transfers are the ones
+  // the request was made on, also when the answers come after the person
+  // opened another printer.
+  const sendStored = (
+    storage: string,
+    source: string,
+    directory: string,
+    action: DropAction,
+  ): void => {
+    const id = deviceId;
+    const store = transfers;
+    const destination = `${directory}/${source.split('/').pop() ?? source}`;
+    dropPicks.set(pickKey(id, destination), action);
+    ctx.running.whenOnItsWay({ deviceId: id, storage, source }, (path) => {
+      void runSlotAction(
+        slots,
+        'device-upload-action',
+        action,
+        printerFileRefOf(id, path),
+      );
+    });
+    storedSends = storedSends
+      .then(() => store.send(storage, source, destination))
+      .then((sent) => {
+        // A send that started no transfer and asks nothing takes its wait
+        // back, so a later send of the same file does not run the choice.
+        const asked = store.waiting.some(
+          (one) => one.storage === storage && one.source === source,
+        );
+        if (sent === undefined && !asked) {
+          ctx.running.notOnItsWay({ deviceId: id, storage, source });
+        }
+      })
+      // A send that threw takes its wait back too, and the files after it
+      // still go.
+      .catch(() => {
+        ctx.running.notOnItsWay({ deviceId: id, storage, source });
+      });
+  };
+
+  // The module's choice each dropped file was sent with, by where it lands.
+  // The question about a taken name reads it, to hand the printer's own file
+  // to that choice. Nothing draws it. It is kept by printer and path, so one
+  // printer's question never offers a choice made on another.
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity
+  const dropPicks = new Map<string, DropAction>();
+  const pickKey = (id: string, path: string): string => `${id}\u0000${path}`;
+
+  // Sends what was dropped, and prints the file at `print` once it lands.
+  // That file goes first, so the print starts before the copies. With
+  // `action`, each file is copied to the printer as any other, and a
+  // module's action runs on it as soon as the copy is on its way, such as a
+  // queue that takes the file before it has landed. A name the printer holds
+  // asks first, and the action runs once the person's answer sends the file.
+  const deliver = (print: number | undefined, action?: DropAction): void => {
     const held = dropped;
     dropped = undefined;
     if (held === undefined || intake === undefined) return;
+    const id = deviceId;
     const kept = keep && keptStorage !== undefined;
-    for (const file of held.files) {
+    for (const one of printFirst(held.files, print)) {
+      const key = pickKey(id, `${held.directory}/${one.file.name}`);
+      if (action === undefined) dropPicks.delete(key);
+      else dropPicks.set(key, action);
       void ctx.sends.send(
-        file,
-        deviceId,
+        one.file,
+        id,
         printerName,
         kept ? keptStorage : intake,
         held.directory,
         {
           keep: kept ? keptFolder : undefined,
-          print,
+          print: one.print,
           onRefused: (ended) => {
-            landings.notPrinted(file.name, ended);
+            landings.notPrinted(one.file.name, ended);
           },
+          onItsWay:
+            action === undefined
+              ? undefined
+              : (path) => {
+                  void runSlotAction(
+                    slots,
+                    'device-upload-action',
+                    action,
+                    printerFileRefOf(id, path),
+                  );
+                },
         },
       );
     }
   };
+
+  // The choices modules add to the drop question that fit every dropped
+  // file.
+  const dropActions = $derived(
+    dropped === undefined
+      ? []
+      : (slots?.registry.declaredActions('device-upload-action') ?? []).filter(
+          (entry) =>
+            dropped?.files.every((file) =>
+              matchesFileType(entry.fileTypes, file.name),
+            ),
+        ),
+  );
 
   // Whether this printer can start a print now, graded the way the print
   // dialog grades it, while the drop question is open.
@@ -491,12 +671,10 @@
       : undefined,
   );
 
-  // The files still going from the browser up to this server, for this
-  // printer alone: the shared store also holds every other printer's.
+  // This printer's files still on their way from this tab; the shared store
+  // also holds every other printer's.
   const uploads = $derived(
-    ctx.sends.rows.filter(
-      (row) => row.deviceId === deviceId && row.step === 'uploading',
-    ),
+    pendingSendsOf(ctx.sends.rows, deviceId, transfers.current),
   );
 
   const onCancelUpload = (id: string): void => {
@@ -521,8 +699,11 @@
     void detail.readStorages({ refresh: true });
   };
 
-  // The chip on the Printer tab names a command and the Advanced tab marks it.
-  let picked = $state<string>();
+  // The chip on the Printer tab locates the command panel for this printer.
+  let picked = $state<{ deviceId: string; verb: string }>();
+  const pickedVerb = $derived(
+    picked?.deviceId === deviceId ? picked.verb : undefined,
+  );
 
   const peer = $derived(
     fleet.devices.length === 2
@@ -530,8 +711,56 @@
       : undefined,
   );
 
+  // A waiting file that is not sent after all takes back the wait of the
+  // module's choice, so a later send of the same file does not run it.
+  const forgetChoice = (id: string, waiting: TakenName | undefined): void => {
+    if (waiting === undefined) return;
+    ctx.running.notOnItsWay({
+      deviceId: id,
+      storage: waiting.storage,
+      source: waiting.source,
+    });
+  };
+
+  // A file sent again after the person's answer waits for the files dropped
+  // beside it that are on their way to the printer, in the place its send
+  // kept.
+  const inTurn = <T,>(work: () => Promise<T>): Promise<T | undefined> =>
+    ctx.sends.inTurn(deviceId, work);
+
+  // Sends the waiting file the way the person answered, and says what no
+  // transfer row will: a start the printer refused, and a send the server
+  // refused before any transfer began, such as a printer still fetching
+  // another file. A transfer that fails says so by its own row.
+  const answerTaken = (answer: () => Promise<PrintEnd | undefined>): void => {
+    const name = takenName ?? '';
+    const id = deviceId;
+    const store = transfers;
+    const waiting = store.taken;
+    const seen = new Set(store.rows.map((row) => row.transferId));
+    void answer().then((ended) => {
+      const moved = store.rows.some((row) => !seen.has(row.transferId));
+      if (!moved) forgetChoice(id, waiting);
+
+      if (ended?.answer !== undefined) {
+        landings.notPrinted(name, ended);
+
+        return;
+      }
+      const fault = ended?.fault ?? transfers.error;
+      if (fault !== undefined && !moved) landings.notSent(name, fault);
+    });
+  };
+
   // A file sent onto a name the printer holds waits for the person's answer.
   const takenName = $derived(transfers.taken?.path.split('/').pop());
+  // The module's choice the waiting file was dropped with, when it had one
+  // and is not a print.
+  const takenAction = $derived(
+    transfers.taken === undefined || transfers.taken.print === true
+      ? undefined
+      : dropPicks.get(pickKey(deviceId, transfers.taken.path)),
+  );
 </script>
 
 <!-- Asked for every drop before anything goes up. -->
@@ -539,6 +768,9 @@
   names={dropped?.files.map((file) => file.name)}
   printer={printerName}
   printTarget={dropTarget}
+  actions={dropActions}
+  preset={dropped?.from}
+  keep={dropped?.from === undefined ? undefined : keepChoice}
   onConfirm={deliver}
   onCancel={() => {
     dropped = undefined;
@@ -549,26 +781,58 @@
 <ReplaceQuestion
   name={takenName}
   print={transfers.taken?.print}
+  readOnly={transfers.taken?.readOnly === true}
   onPrintHeld={() => {
     // Nothing is sent, so a failed request is said here as well as a refusal.
     const name = takenName ?? '';
+    forgetChoice(deviceId, transfers.taken);
     void transfers.printTaken().then((ended) => {
       if (ended !== undefined) landings.notPrinted(name, ended);
     });
   }}
   onReplace={() => {
-    // A transfer that fails is said by its own row; only the start is said here.
-    const name = takenName ?? '';
-    void transfers.replaceTaken().then((ended) => {
-      if (ended?.answer !== undefined) landings.notPrinted(name, ended);
-    });
+    answerTaken(() => transfers.replaceTaken(inTurn));
   }}
+  onKeepBoth={() => {
+    answerTaken(() => transfers.bothTaken(inTurn));
+  }}
+  onUseHeld={takenAction === undefined
+    ? undefined
+    : () => {
+        // Read before the question closes: both follow the waiting send.
+        const action = takenAction;
+        const path = transfers.taken?.path;
+        forgetChoice(deviceId, transfers.taken);
+        transfers.keepTaken();
+        if (path === undefined) return;
+        void runSlotAction(
+          slots,
+          'device-upload-action',
+          action,
+          printerFileRefOf(deviceId, path),
+        );
+      }}
   onKeep={() => {
+    forgetChoice(deviceId, transfers.taken);
     transfers.keepTaken();
   }}
 />
 
+{#snippet materialHeader(fallback: Snippet)}
+  {#if MaterialsPositions}
+    <svelte:boundary>
+      <div data-module={materialsNamespace} class="contents">
+        <MaterialsPositions {deviceId} compact {fallback} />
+      </div>
+      {#snippet failed()}
+        {@render fallback()}
+      {/snippet}
+    </svelte:boundary>
+  {/if}
+{/snippet}
+
 <PrinterDetailScreen
+  filamentPositions={MaterialsPositions ? materialHeader : undefined}
   {deviceId}
   {device}
   {telemetry}
@@ -588,6 +852,7 @@
   }}
   {tab}
   onTabChange={(next: string) => {
+    picked = undefined;
     ctx.go(printerHref(deviceId, next));
   }}
   fault={fleet.error ?? (listed === undefined ? detail.recordError : undefined)}
@@ -601,7 +866,6 @@
     cameras: camerasTab ? camerasPanel : undefined,
     info,
     history: historyPanel,
-    commands: commandsPanel,
   }}
   moduleTabs={tabsForModules}
   actions={headerActions}
@@ -616,6 +880,8 @@
         {telemetry}
         commands={port}
         camera={feed}
+        issues={ctx.deviceIssues}
+        problemHref={printerHref(deviceId, 'history')}
         history={detail}
         recent={detail.recent}
         files={detail}
@@ -642,12 +908,20 @@
 {/snippet}
 
 {#snippet controls()}
-  <PrinterControlsPanel
-    {device}
-    {telemetry}
-    commands={port}
-    loading={!fleet.loaded}
-  />
+  {#key deviceId}
+    <PrinterControlsPanel
+      {device}
+      {telemetry}
+      commands={port}
+      loading={!fleet.loaded}
+      material={MaterialsPositions ? materialCell : undefined}
+      advanced={{
+        commands,
+        requested: tab === 'commands',
+        highlight: pickedVerb,
+      }}
+    />
+  {/key}
 {/snippet}
 
 {#snippet files()}
@@ -667,6 +941,7 @@
         onRecheck={recheckStorages}
         {uploads}
         {onCancelUpload}
+        fileActions={deviceFileActions}
       />
     {/key}
   {/if}
@@ -684,11 +959,28 @@
     }}
     jobsHref={jobsOfPrinterHref(deviceId)}
     onPickCommand={(verb: string) => {
-      picked = verb;
+      picked = { deviceId, verb };
       ctx.go(printerHref(deviceId, 'commands'));
     }}
     access={accessCard}
+    {telemetry}
+    commands={port}
+    material={MaterialsPositions ? materialCell : undefined}
   />
+{/snippet}
+
+<!-- The Tools table assigns a material through the picker of the header chip. -->
+{#snippet materialCell(toolId: string, fallback: Snippet)}
+  {#if MaterialsPositions}
+    <svelte:boundary>
+      <div data-module={materialsNamespace} class="contents">
+        <MaterialsPositions {deviceId} compact {toolId} {fallback} />
+      </div>
+      {#snippet failed()}
+        {@render fallback()}
+      {/snippet}
+    </svelte:boundary>
+  {/if}
 {/snippet}
 
 {#snippet camerasPanel()}
@@ -771,13 +1063,18 @@
   {/key}
 {/snippet}
 
-{#snippet commandsPanel()}
-  <PrinterCommandsPanel
-    {device}
-    {commands}
-    highlight={picked}
-    loading={!fleet.loaded}
-    readingDrive={detail.readingDrive}
+<!-- A module's device-file-action entries, in each file's menu beside the
+     panel's own items. -->
+{#snippet deviceFileActions(
+  entry: PrinterFileEntry,
+  items: Snippet | undefined,
+)}
+  <SlotActions
+    name="device-file-action"
+    printerFileRef={printerFileRefOf(deviceId, entry.path)}
+    label={entry.display_name ?? entry.name}
+    class={ABOVE_ROW_LINK}
+    {items}
   />
 {/snippet}
 
@@ -791,11 +1088,36 @@
 {/snippet}
 
 {#snippet moduleTab()}
-  <SlotOutlet
-    screen="printer-detail"
-    name="device-tab"
-    {deviceId}
-    device={slotDevice}
-    entry={tab}
-  />
+  {#key deviceId}
+    <!-- A module's tab may start something on the printer, as the queue's
+         start button does, and the printer may answer with a question on its
+         screen. It may send a file to the printer too, as the queue does with a
+         file from a storage. Both are drawn here as on the Now tab, so the
+         person need not go looking for them there. Nothing is drawn while the
+         printer asks nothing and nothing moves. -->
+    <div class="flex flex-col gap-4">
+      {#if device}
+        <PrinterDialog {device} {telemetry} commands={port} />
+      {/if}
+      {#if transfers.inFlight.length > 0 || uploads.length > 0}
+        <Card>
+          <CardContent>
+            <PrinterTransfers
+              {transfers}
+              {uploads}
+              {onCancelUpload}
+              label="text-xs font-medium text-muted-foreground"
+            />
+          </CardContent>
+        </Card>
+      {/if}
+      <SlotOutlet
+        screen="printer-detail"
+        name="device-tab"
+        {deviceId}
+        device={slotDevice}
+        entry={tab}
+      />
+    </div>
+  {/key}
 {/snippet}

@@ -168,4 +168,61 @@ describe('TransferAnnouncer', () => {
     expect(said[1]).toBe('lid.bgcode was not printed: the printer went away');
     error.mockRestore();
   });
+
+  it('says a replace the printer refused did not reach it, with the reason', () => {
+    const error = vi.spyOn(toast, 'error').mockImplementation(() => '1');
+    const announcer = new TransferAnnouncer();
+
+    announcer.notSent('cube.bgcode', {
+      code: 'core.unknown/NOT_IN_THE_REGISTRY',
+      status: 409,
+      params: {},
+      message: 'the printer still has the file open',
+      traceId: undefined,
+    });
+
+    expect(String(error.mock.calls[0]?.[0])).toBe(
+      'cube.bgcode did not reach the printer: the printer still has the file open',
+    );
+    error.mockRestore();
+  });
+
+  const refused = (params: Record<string, string> = {}) => ({
+    code: 'core.unknown/NOT_IN_THE_REGISTRY',
+    status: 409,
+    params,
+    message: 'the printer still has the file open',
+    traceId: undefined,
+  });
+
+  it('says nothing about a send the person stopped', () => {
+    const error = vi.spyOn(toast, 'error').mockImplementation(() => '1');
+    const announcer = new TransferAnnouncer();
+
+    announcer.notSent('cube.bgcode', refused({ event: 'stopped' }));
+    announcer.notPrinted('cube.bgcode', {
+      fault: refused({ event: 'stopped' }),
+    });
+
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  // The row of a transfer that ran and failed says it, and so would the
+  // answer of the send that started it.
+  it('says one failure of a file once, from its row or from its answer', () => {
+    const error = vi.spyOn(toast, 'error').mockImplementation(() => '1');
+    const announcer = new TransferAnnouncer();
+    announcer.observe('p1', [], true);
+
+    announcer.observe(
+      'p1',
+      [{ ...row('t-1', 'failed'), path: 'usb/cube.bgcode', reason: 'cut off' }],
+      true,
+    );
+    announcer.notSent('cube.bgcode', refused());
+
+    expect(error).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
 });

@@ -294,6 +294,7 @@ var pagesCitingNothing = []string{
 	"reference/extensions/materials.md",
 	"reference/extensions/parts.md",
 	"reference/extensions/server-slicing.md",
+	"reference/extensions/simple-queue.md",
 	"reference/extensions/threemf.md",
 	"reference/module-slots.md",
 	"resource-kinds.md",

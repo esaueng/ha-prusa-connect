@@ -3058,7 +3058,7 @@ export interface paths {
         };
         /**
          * How this deployment's web app looks
-         * @description Reports the name, the fallback language, the theme and the brand file this server's own page draws with, and whether that page is served here at all. It takes no credential, because the page reads it before it paints and before anybody has signed in. It names no account, no printer and no module. It does say whether a new printer waits for a person's approval, which anybody who can reach the printer port learns anyway.
+         * @description Reports the name, the fallback language and the theme this server's own page draws with, and whether that page is served here at all. It takes no credential, because the page reads it before it paints and before anybody has signed in. It names no account, no printer and no module. It does say whether a new printer waits for a person's approval, which anybody who can reach the printer port learns anyway.
          */
         get: operations["get-ui-settings"];
         put?: never;
@@ -3505,8 +3505,6 @@ export interface components {
             printer_custom_ca: boolean;
             /** @description Present while this run is in safe mode: every module is off, whatever the configuration says, until the server restarts normally. It never names who asked for it. */
             readonly safe_mode?: components["schemas"]["SafeModeState"];
-            /** @description The brand file the component library reads its primary colour out of, named without its .css. "default" is the orange seed in the theme itself. */
-            skin: string;
             /** @description Where the app's Support link points. Empty keeps the assistant on the beta portal. */
             support_url?: string;
             /** @description system, light or dark. system follows whatever the operating system asks for. */
@@ -4487,8 +4485,20 @@ export interface components {
         DeviceFile: {
             /** @description The name written for a person, absent when the printer reports only one name. */
             display_name?: string;
+            /**
+             * Format: int64
+             * @description The print time the slicer estimated, in whole seconds, as the printer read it out of the file. It is present only on the directory of an answer about one print file, and absent for a printer or a file that names none.
+             */
+            estimated_seconds?: number;
             /** @description Whether the entry holds other entries. */
             folder: boolean;
+            /**
+             * Format: double
+             * @description The layer height the file was sliced with, in millimetres. Present only on the directory of an answer about one print file that names it.
+             */
+            layer_height_mm?: number;
+            /** @description The material the file was sliced for, one for each tool joined by a semicolon, such as PLA;PETG. Present only on the directory of an answer about one print file that names it. */
+            material?: string;
             /**
              * Format: date-time
              * @description When the entry last changed, as an RFC 3339 string. The printer reports whole seconds, so this value has no fraction of a second. It is absent for a board that reported no timestamp.
@@ -4498,6 +4508,8 @@ export interface components {
             name: string;
             /** @description The storage-prefixed path, such as usb/models/part.bgcode. It is what the files endpoint takes. */
             path: string;
+            /** @description The printer the file was sliced for, such as XL2IS. Present only on the directory of an answer about one print file that names it. */
+            printer_model?: string;
             /** @description Whether the printer refuses to change this entry. */
             read_only: boolean;
             /**
@@ -4802,6 +4814,8 @@ export interface components {
             total: number;
         };
         DevicePrint: {
+            /** @description With a storage, send under a free name when the printer holds another file at path, such as usb/part[1].bgcode, keep the printer's file and print the one sent. The answer's path names the file that was started. Refused together with replace. */
+            keep_both?: boolean;
             /** @description The file on the printer, storage-prefixed and relative, such as usb/bracket.bgcode. With a storage it is where the file lands; without one it is the file that is printed. */
             path: string;
             /** @description With a storage, delete the file the printer holds at path before sending this one. Without it any file there other than this server's unchanged copy of the same stored file is refused with core.printer/FILE_NAME_TAKEN, so a page can ask the person first. */
@@ -5018,6 +5032,8 @@ export interface components {
             warning?: string;
         };
         DeviceUpload: {
+            /** @description Send under a free name when the printer already holds a file at path, such as usb/part[1].bgcode, and keep the printer's file. The transfer names the path the file lands at. Refused together with replace. */
+            keep_both?: boolean;
             /** @description Where the file lands on the printer: storage-prefixed and relative, such as usb/part.bgcode. */
             path: string;
             /** @description Delete a file the printer already holds at path before sending this one. Without it such a file is refused with core.printer/FILE_NAME_TAKEN, so a page can ask the person first. */
@@ -7092,10 +7108,14 @@ export interface components {
             device_action?: components["schemas"]["ResourceAction"][] | null;
             /** @description One line on each printer's card in the listing, under its status. Text past one line is cut. */
             device_card?: components["schemas"]["ResourceSection"][] | null;
+            /** @description An item in the action menu of each file on a printer's Files tab. A folder has none. */
+            device_file_action?: components["schemas"]["ResourceAction"][] | null;
             /** @description A section at the foot of a printer's Status tab, after the core's own. */
             device_section?: components["schemas"]["ResourceSection"][] | null;
             /** @description A tab of the module's own on a printer's page, after the core's tabs. */
             device_tab?: components["schemas"]["ResourceSection"][] | null;
+            /** @description A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way. */
+            device_upload_action?: components["schemas"]["ResourceAction"][] | null;
             /** @description An item in a file's menu, in the listing and on its page. A primary one is a button on the page. */
             file_action?: components["schemas"]["ResourceAction"][] | null;
             /** @description A tab of the module's own on a file's page, after the core's tabs. */
@@ -7436,6 +7456,8 @@ export interface components {
             summary: string;
         };
         ResourceSection: {
+            /** @description On a printer tab, true when the module's manifest asks for the tab's page to be cross-origin isolated. The server then sends that page with both isolation headers unless the tab is hidden, and a client opens and leaves the tab with a full page load. Absent otherwise. */
+            cross_origin_isolated?: boolean;
             /** @description On a device slot, the devices the entry is drawn for. Absent for every device. */
             devices?: components["schemas"]["ResourceDeviceSelector"];
             /** @description For a slot handed a file, the file types the entry is drawn for: a lowercase extension with its dot, such as .3mf. Absent for every file. */
@@ -24707,7 +24729,6 @@ export interface operations {
                      *       "modules": true,
                      *       "printer_admission": "approval",
                      *       "printer_custom_ca": false,
-                     *       "skin": "default",
                      *       "theme": "system",
                      *       "title": "Prusa Connect",
                      *       "upgrades": true
@@ -24757,7 +24778,7 @@ export interface operations {
                      *           "path": "/api/v1/vocabularies/event-types",
                      *           "reference": "/docs/event-types/",
                      *           "summary": "The core event types this build publishes, and the class each one is carried under.",
-                     *           "version": "3.8.0"
+                     *           "version": "3.9.0"
                      *         }
                      *       ]
                      *     }
@@ -25337,7 +25358,7 @@ export interface operations {
                      *         }
                      *       ],
                      *       "namespace": "com.prusa.connect.",
-                     *       "version": "3.8.0",
+                     *       "version": "3.9.0",
                      *       "vocabulary": "event-types"
                      *     }
                      */

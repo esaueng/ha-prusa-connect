@@ -10,6 +10,10 @@ import (
 // file. It is a feature, not a command. A driver maps it to its own protocol.
 const VerbFileUpload Capability = CorePrefix + "feature.file_upload"
 
+// VerbSetPrinterReady is the command that makes a device ready for its next
+// job. A state a transition of this verb leads to is the device's ready state.
+const VerbSetPrinterReady Capability = CorePrefix + "command.set_printer_ready"
+
 // The errors of a transfer. Callers inspect them with errors.Is.
 var (
 	// ErrNoTransfers reports a session whose dialect cannot take a file.

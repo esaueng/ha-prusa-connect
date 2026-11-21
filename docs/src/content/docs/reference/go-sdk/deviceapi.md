@@ -731,6 +731,17 @@ type Device struct {
     Capabilities    []string `json:"capabilities,omitempty"`
     CapabilityEpoch uint64   `json:"capability_epoch,omitempty"`
 
+    // Accepts is the enabled verbs the device takes in the state it is in,
+    // sorted, as its connector declared them. It is nil for a device whose
+    // connector declares no such list, and empty for one that takes nothing,
+    // as a device that is away does. It is a hint for deciding what to offer,
+    // and the device's own answer to a command stays the decision.
+    Accepts []string `json:"accepts"`
+
+    // Ready says a person told the device its bed is clear: it is connected
+    // and in a state `core.command.set_printer_ready` leads to.
+    Ready bool `json:"ready,omitempty"`
+
     // State is the addressable state tree the device last reported, keyed by
     // path. `/state` carries the state machine value.
     //
@@ -813,6 +824,18 @@ type File struct {
     Size     int64 `json:"size"`
     Modified int64 `json:"modified"`
     ReadOnly bool  `json:"read_only"`
+    // EstimatedSeconds is the print time the slicer estimated, in whole
+    // seconds, as the printer read it out of the file. It comes only on
+    // Listing.Entry, the answer about one print file, and is zero for a
+    // printer or a file that names none.
+    EstimatedSeconds int64 `json:"estimated_seconds,omitempty"`
+    // PrinterModel, LayerHeightMM and Material are what the slicer wrote:
+    // the printer it sliced for, the layer height in millimetres, and the
+    // material, one for each tool joined by a semicolon. They come only on
+    // Listing.Entry, and are empty or zero for a file that names none.
+    PrinterModel  string  `json:"printer_model,omitempty"`
+    LayerHeightMM float64 `json:"layer_height_mm,omitempty"`
+    Material      string  `json:"material,omitempty"`
 }
 ```
 
@@ -831,6 +854,15 @@ type FilesParams struct {
 
     Limit  int `json:"limit,omitempty"`
     Offset int `json:"offset,omitempty"`
+
+    // Cached answers a path from what the server last read of it, at once
+    // and without waiting on the printer, which runs one command at a time.
+    // The rows may be out of date, and a file in a folder's rows carries no
+    // slicer's facts. A path the server holds nothing of is answered with no
+    // rows and no entry while the read it starts runs, so asking again a
+    // little later finds it. A path whose last read failed is answered the
+    // same way, and is not read again for this ask.
+    Cached bool `json:"cached,omitempty"`
 }
 ```
 
@@ -1145,6 +1177,12 @@ type PrintParams struct {
     Storage string `json:"storage,omitempty"`
     Source  string `json:"source,omitempty"`
     Path    string `json:"path"`
+
+    // KeepBoth sends the file under a free name when the printer holds
+    // another file at Path, such as usb/part[1].bgcode, and keeps the
+    // printer's file. Started.Path names the file that is printed. It needs a
+    // storage.
+    KeepBoth bool `json:"keep_both,omitempty"`
 }
 ```
 
@@ -1222,6 +1260,11 @@ A refused command is a Result with OK false and not a transport error. The call 
 type Started struct {
     TransferID string `json:"transfer_id,omitempty"`
     CommandID  string `json:"command_id,omitempty"`
+
+    // Path is the file on the printer that is printed. With KeepBoth it may
+    // be a numbered name and not the path asked for. A host older than
+    // KeepBoth leaves it empty.
+    Path string `json:"path,omitempty"`
 }
 ```
 

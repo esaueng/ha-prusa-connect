@@ -7,6 +7,27 @@ import { render } from 'vitest-browser-svelte';
 
 import fixtures from '../test/ux/fixtures/api.json';
 import { screen } from '../test/screen-probe';
+import type * as Isolation from './lib/isolation';
+
+// The app asks the router to hand isolated module tabs to the browser. The
+// call goes through as it is, and its arguments are kept.
+const isolation = vi.hoisted(() => ({
+  calls: [] as Parameters<typeof Isolation.isolateModuleTabs>[],
+}));
+vi.mock('./lib/isolation', async (original) => {
+  const real = await original<typeof Isolation>();
+
+  return {
+    ...real,
+    isolateModuleTabs: (
+      ...args: Parameters<typeof real.isolateModuleTabs>
+    ): ReturnType<typeof real.isolateModuleTabs> => {
+      isolation.calls.push(args);
+
+      return real.isolateModuleTabs(...args);
+    },
+  };
+});
 
 vi.mock('./lib/screens', async () => {
   const { default: Counting } = await import('../test/counting-screen.svelte');
@@ -71,11 +92,32 @@ const report = (): Element | null =>
 beforeEach(() => {
   serve();
   screen.mounts = 0;
+  screen.registry = undefined;
   screen.failing = false;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('isolated module tabs', () => {
+  it('asks the router to hand them to the browser, from the registry its screens read', async () => {
+    isolation.calls = [];
+    const { default: App } = await import('./app.svelte');
+
+    await render(App);
+
+    await expect.element(page.getByRole('navigation').first()).toBeVisible();
+    await expect.poll(() => screen.registry).toBeDefined();
+    expect(isolation.calls).toHaveLength(1);
+    const [router, registry, read] = isolation.calls[0] ?? [];
+    expect(router).toBeDefined();
+    // The registry the module loader fills, which the printer's tab strip
+    // reads too.
+    expect(registry).toBe(screen.registry);
+    // The browser's own reading of the document is left in place.
+    expect(read).toBeUndefined();
+  });
 });
 
 describe('the application boundary', () => {
@@ -256,12 +298,15 @@ describe('the application boundary', () => {
       await expect
         .element(page.getByRole('button', { name: 'Restart in safe mode' }))
         .toBeVisible();
-      const tabs = page.getByRole('navigation', { name: 'Server settings' });
       await expect
-        .element(tabs.getByText('Overview', { exact: true }))
+        .element(page.getByRole('tab', { name: 'Overview', exact: true }))
         .toBeVisible();
-      expect(tabs.getByText('Updates', { exact: true }).elements()).toEqual([]);
-      expect(tabs.getByText('Backups', { exact: true }).elements()).toEqual([]);
+      expect(
+        page.getByRole('tab', { name: 'Updates', exact: true }).elements(),
+      ).toEqual([]);
+      expect(
+        page.getByRole('tab', { name: 'Backups', exact: true }).elements(),
+      ).toEqual([]);
       expect(
         asked().filter(
           (path) =>
@@ -286,5 +331,24 @@ describe('the application boundary', () => {
         ).not.toBeNull();
       },
     );
+  });
+});
+
+describe('the skin', () => {
+  afterEach(() => {
+    localStorage.removeItem('skin');
+  });
+
+  it('forgets a skin an older build stored', async () => {
+    localStorage.setItem('skin', 'slicer');
+    history.pushState(null, '', '/printers/one');
+    const { default: App } = await import('./app.svelte');
+
+    await render(App, { props: { useServerAppearance: true } });
+    await expect
+      .element(page.getByTestId('counting-screen'))
+      .toBeInTheDocument();
+
+    expect(localStorage.getItem('skin')).toBeNull();
   });
 });

@@ -53,19 +53,21 @@ func TestEveryScreenAndAreaIsUsed(t *testing.T) {
 func TestTheKeyAndTheRegisterNameFollowFromTheName(t *testing.T) {
 	t.Parallel()
 	cases := map[manifest.SlotName]struct{ key, register, field string }{
-		manifest.SlotPage:          {"pages", "page", "Pages"},
-		manifest.SlotSettings:      {"settings", "settings", "Settings"},
-		manifest.SlotDeviceCard:    {"device_card", "deviceCard", "DeviceCard"},
-		manifest.SlotDeviceSection: {"device_section", "deviceSection", "DeviceSection"},
-		manifest.SlotCameraSection: {"camera_section", "cameraSection", "CameraSection"},
-		manifest.SlotCameraView:    {"camera_view", "cameraView", "CameraView"},
-		manifest.SlotDeviceTab:     {"device_tab", "deviceTab", "DeviceTab"},
-		manifest.SlotDeviceAction:  {"device_action", "deviceAction", "DeviceAction"},
-		manifest.SlotDashboardCard: {"cards", "card", "Cards"},
-		manifest.SlotFileAction:    {"file_action", "fileAction", "FileAction"},
-		manifest.SlotPrintSection:  {"print_section", "printSection", "PrintSection"},
-		manifest.SlotFileView:      {"file_view", "fileView", "FileView"},
-		manifest.SlotFileTab:       {"file_tab", "fileTab", "FileTab"},
+		manifest.SlotPage:               {"pages", "page", "Pages"},
+		manifest.SlotSettings:           {"settings", "settings", "Settings"},
+		manifest.SlotDeviceCard:         {"device_card", "deviceCard", "DeviceCard"},
+		manifest.SlotDeviceSection:      {"device_section", "deviceSection", "DeviceSection"},
+		manifest.SlotCameraSection:      {"camera_section", "cameraSection", "CameraSection"},
+		manifest.SlotCameraView:         {"camera_view", "cameraView", "CameraView"},
+		manifest.SlotDeviceTab:          {"device_tab", "deviceTab", "DeviceTab"},
+		manifest.SlotDeviceAction:       {"device_action", "deviceAction", "DeviceAction"},
+		manifest.SlotDashboardCard:      {"cards", "card", "Cards"},
+		manifest.SlotFileAction:         {"file_action", "fileAction", "FileAction"},
+		manifest.SlotPrintSection:       {"print_section", "printSection", "PrintSection"},
+		manifest.SlotFileView:           {"file_view", "fileView", "FileView"},
+		manifest.SlotFileTab:            {"file_tab", "fileTab", "FileTab"},
+		manifest.SlotDeviceFileAction:   {"device_file_action", "deviceFileAction", "DeviceFileAction"},
+		manifest.SlotDeviceUploadAction: {"device_upload_action", "deviceUploadAction", "DeviceUploadAction"},
 	}
 	for name, want := range cases {
 		if got := name.Key(); got != want.key {

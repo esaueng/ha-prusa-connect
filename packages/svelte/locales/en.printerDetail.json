@@ -7,8 +7,7 @@
   "printerDetail.chip.speed": "Speed",
   "printerDetail.chip.tool": "Active tool",
   "printerDetail.chip.toolActive": "Active",
-  "printerDetail.chip.toolNumber": "T{n}",
-  "printerDetail.chip.toolTarget": "Target for T{n} ({unit})",
+  "printerDetail.chip.toolTarget": "Target for {tool} ({unit})",
   "printerDetail.commands.detail.beep": "Starts the printer's buzzer.",
   "printerDetail.commands.detail.cancelObject": "Cancels the printing of a specific object on the print bed.",
   "printerDetail.commands.detail.cancelPrinterReady": "Takes the printer out of its ready state.",
@@ -138,5 +137,13 @@
   "printerDetail.uploadBlocked.noStorage.title": "No USB drive in the printer",
   "printerDetail.uploadBlocked.recheck": "Check again",
   "printerDetail.uploadBlocked.storagesUnknown.note": "The printer has not said yet where it can keep a file. Uploading starts once it has.",
-  "printerDetail.uploadBlocked.storagesUnknown.title": "Waiting for the printer's storage"
+  "printerDetail.uploadBlocked.storagesUnknown.title": "Waiting for the printer's storage",
+  "printerDetail.pendingUpload.asking": "Waiting for your answer",
+  "printerDetail.pendingUpload.checking": "Checking the printer…",
+  "printerDetail.pendingUpload.replacing": "Deleting the file on the printer…",
+  "printerDetail.pendingUpload.cancel": "Cancel",
+  "printerDetail.pendingUpload.cancelFor": "Cancel {name}",
+  "printerDetail.pendingUpload.sending": "Sending to the printer",
+  "printerDetail.pendingUpload.uploading": "Uploading to the server",
+  "printerDetail.pendingUpload.waiting": "Waiting for the printer"
 }

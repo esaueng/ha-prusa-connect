@@ -70,13 +70,20 @@ const appMountReason = "the core's own app, compiled into the full build and ser
 	"A browser navigation is not an operation a client calls, and the addresses below it belong to the " +
 	"app's router"
 
+// AppOptions configure the app's mount. The zero value isolates no tab.
+type AppOptions struct {
+	// IsolatedTab reports whether a module's printer tab asks for a
+	// cross-origin isolated page. Nil is no such tab.
+	IsolatedTab func(namespace, tab string) bool
+}
+
 // AppMount is the /* mount that serves the core's app, and false for a build
 // that carries none.
 //
 // A build without the app returns false and not a mount that answers 404.
 // With no mount the root falls through to a module's root mount and then to
 // this server's own refusal.
-func AppMount() (Mount, bool) {
+func AppMount(opts AppOptions) (Mount, bool) {
 	files, ok := appBundle()
 	if !ok {
 		return Mount{}, false
@@ -84,7 +91,7 @@ func AppMount() (Mount, bool) {
 
 	return Mount{
 		Pattern: rootCatchAll,
-		Handler: AppHandler(files),
+		Handler: AppHandler(files, opts),
 		Reason:  appMountReason,
 	}, true
 }
@@ -100,8 +107,16 @@ func AppMount() (Mount, bool) {
 // The method is not checked here. The mount is wrapped in navigations before
 // it reaches the router. That wrapper refuses a request that is not a
 // navigation, and this handler is reached only through it.
-func AppHandler(files fs.FS) http.Handler {
-	etags := sync.OnceValue(func() appETags { return appETagsOf(appDigest(files)) })
+//
+// At the address of a printer tab that asks for an isolated page, the entry
+// document carries the isolation headers and entity tags of its own. Every
+// other answer is the same as without such a tab.
+func AppHandler(files fs.FS, opts AppOptions) http.Handler {
+	etags := sync.OnceValue(func() appTagSets {
+		digest := appDigest(files)
+
+		return appTagSets{open: appETagsOf(digest, false), isolated: appETagsOf(digest, true)}
+	})
 	slots := make(chan struct{}, appDecompressSlots)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +154,14 @@ func AppHandler(files fs.FS) http.Handler {
 			return
 		}
 
-		writeAppFile(w, r, files, served, etags(), slots)
+		tags := etags().open
+		if served.name == appEntry && isolatedTabPath(r.URL.EscapedPath(), opts.IsolatedTab) {
+			setCrossOriginIsolation(w.Header())
+
+			tags = etags().isolated
+		}
+
+		writeAppFile(w, r, files, served, tags, slots)
 	})
 }
 
@@ -189,9 +211,25 @@ type appETags struct {
 	compressed string
 }
 
-func appETagsOf(digest string) appETags {
+// appTagSets are the entity tags of the bundle as a page that is not isolated
+// and as an isolated one.
+type appTagSets struct {
+	open     appETags
+	isolated appETags
+}
+
+// appIsolatedSuffix follows the digest in the entity tags of an isolated entry
+// document. A 304 updates only the headers it carries (RFC 9111 §4.3.4), so a
+// shared tag would keep an address isolated after its module stops asking.
+const appIsolatedSuffix = "-isolated"
+
+func appETagsOf(digest string, isolated bool) appETags {
 	if digest == "" {
 		return appETags{}
+	}
+
+	if isolated {
+		digest += appIsolatedSuffix
 	}
 
 	return appETags{plain: etagOf(digest), compressed: etagOf(digest + "-gzip")}

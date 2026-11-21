@@ -31,6 +31,13 @@ const (
 	SlotFileAction SlotName = "file-action"
 	// SlotPrintSection is a section in the print dialog of a file in a storage.
 	SlotPrintSection SlotName = "print-section"
+	// SlotDeviceFileAction is an item in the action menu of a file on a
+	// printer, on the printer page's Files tab.
+	SlotDeviceFileAction SlotName = "device-file-action"
+	// SlotDeviceUploadAction is a choice in the question a file dropped on a
+	// printer's page asks. The file is copied to the printer, and the action
+	// runs on it as soon as the copy is on its way.
+	SlotDeviceUploadAction SlotName = "device-upload-action"
 	// SlotFileView is the part of a file's page that says what the file
 	// contains. A module's view replaces the core's own.
 	SlotFileView SlotName = "file-view"
@@ -161,6 +168,12 @@ const (
 	// AreaCameraPicture is the picture of one camera in a printer's Cameras
 	// tab.
 	AreaCameraPicture Area = "camera-picture"
+	// AreaDeviceFileActions is the action menu of each file on a printer's
+	// Files tab, in the list and in the tiles.
+	AreaDeviceFileActions Area = "device-file-actions"
+	// AreaDropChoices is the list of choices in the question a file dropped on
+	// a printer's page asks.
+	AreaDropChoices Area = "drop-choices"
 )
 
 // Areas is every area.
@@ -168,6 +181,7 @@ func Areas() []Area {
 	return []Area{
 		AreaPage, AreaPanes, AreaCardLine, AreaStatusFoot, AreaTabs, AreaHeaderActions, AreaGrid,
 		AreaFileActions, AreaPrintOptions, AreaFileBody, AreaFileTabs, AreaCameraFoot, AreaCameraPicture,
+		AreaDeviceFileActions, AreaDropChoices,
 	}
 }
 
@@ -204,6 +218,11 @@ const (
 	SubjectFile
 	// SubjectCamera hands the camera's name, the one its HTTP routes take.
 	SubjectCamera
+	// SubjectPrinterFile hands a printer file reference: the device id, a
+	// colon, and the file's path on the printer, such as usb/part.bgcode. A
+	// device id never holds a colon, so the first one splits the two, the way
+	// it splits a file reference.
+	SubjectPrinterFile
 )
 
 // Prop is the name the id is handed under, and empty for SubjectNone.
@@ -215,6 +234,8 @@ func (s Subject) Prop() string {
 		return "fileRef"
 	case SubjectCamera:
 		return "camera"
+	case SubjectPrinterFile:
+		return "printerFileRef"
 	case SubjectNone:
 		return ""
 	default:
@@ -232,6 +253,8 @@ func (s Subject) Doc() string {
 		return "the file reference `<storage>:<path>`"
 	case SubjectCamera:
 		return "the camera's name"
+	case SubjectPrinterFile:
+		return "the printer file reference `<device id>:<path>`"
 	case SubjectNone:
 		return ""
 	default:
@@ -258,6 +281,9 @@ type Slot struct {
 	// Primary is whether an entry of an action slot may ask to be a button
 	// on its subject's own page instead of an item in its menu.
 	Primary bool
+	// CrossOriginIsolated is whether an entry may ask for a cross-origin
+	// isolated page.
+	CrossOriginIsolated bool
 }
 
 //nolint:gochecknoglobals // a closed table, read and never written.
@@ -287,9 +313,14 @@ var slots = []Slot{
 		Offer:   "a section at the foot of each printer's Status tab",
 	},
 	{
-		Name: SlotDeviceTab, Screen: ScreenPrinterDetail, Area: AreaTabs, Form: FormSection, Subject: SubjectDevice,
-		Where: "A tab of the module's own on a printer's page, after the core's tabs.",
-		Offer: "a tab of its own on each printer's page",
+		Name:                SlotDeviceTab,
+		Screen:              ScreenPrinterDetail,
+		Area:                AreaTabs,
+		Form:                FormSection,
+		Subject:             SubjectDevice,
+		Where:               "A tab of the module's own on a printer's page, after the core's tabs.",
+		Offer:               "a tab of its own on each printer's page",
+		CrossOriginIsolated: true,
 	},
 	{
 		Name:    SlotDashboardCard,
@@ -363,6 +394,24 @@ var slots = []Slot{
 		Subject: SubjectCamera,
 		Where:   "The live view of a camera of a type the module offers, drawn over its picture while a person plays it.",
 		Offer:   "the live view of a camera of a type it offers",
+	},
+	{
+		Name:    SlotDeviceFileAction,
+		Screen:  ScreenPrinterDetail,
+		Area:    AreaDeviceFileActions,
+		Form:    FormAction,
+		Subject: SubjectPrinterFile,
+		Where:   "An item in the action menu of each file on a printer's Files tab. A folder has none.",
+		Offer:   "an item in the action menu of each file on a printer",
+	},
+	{
+		Name:    SlotDeviceUploadAction,
+		Screen:  ScreenPrinterDetail,
+		Area:    AreaDropChoices,
+		Form:    FormAction,
+		Subject: SubjectPrinterFile,
+		Where:   "A choice in the question a file dropped on a printer's page asks. The action runs once the copy is on its way.",
+		Offer:   "a choice for a file dropped on a printer, run while it is copied there",
 	},
 }
 
