@@ -78,9 +78,14 @@ func CheckSettings(ctx context.Context, r io.ReaderAt, size int64, limits Limits
 }
 
 // normalizedEntryName cleans a ZIP entry name the way PrusaSlicer does before
-// matching settings files: backslashes become slashes, leading slashes and
+// matching settings files: the name ends at its first NUL, as miniz reads it
+// as a C string, backslashes become slashes, and leading slashes and
 // redundant dot segments are stripped.
 func normalizedEntryName(raw string) string {
+	if cut, _, found := strings.Cut(raw, "\x00"); found {
+		raw = cut
+	}
+
 	slashed := strings.ReplaceAll(raw, "\\", "/")
 	trimmed := strings.TrimLeft(slashed, "/")
 	cleaned := path.Clean(trimmed)
@@ -90,13 +95,13 @@ func normalizedEntryName(raw string) string {
 
 // settingsKind reports which settings file a ZIP entry name resolves to, after
 // matching PrusaSlicer's path separator normalization and case-folding, or ""
-// when the entry is not a settings file.
+// when the entry is not a settings file. The slicer compares the whole path,
+// so a file of the same name in another folder is not one it reads.
 func settingsKind(raw string) string {
 	normalized := normalizedEntryName(raw)
-	base := path.Base(normalized)
 
 	for _, want := range settingsEntries() {
-		if strings.EqualFold(normalized, want) || strings.EqualFold(base, path.Base(want)) {
+		if strings.EqualFold(normalized, want) {
 			return want
 		}
 	}
@@ -105,9 +110,9 @@ func settingsKind(raw string) string {
 }
 
 // checkArchiveSettings checks every entry whose name is a settings file's,
-// in any case or path-separator spelling: a zip may hold backslashes, leading
-// slashes or duplicate entries differing only in case, and the slicer may read
-// any of them.
+// in any case or path spelling: a zip may hold backslashes, leading slashes,
+// a NUL-terminated name or duplicate entries differing only in case, and the
+// slicer may read any of them.
 func checkArchiveSettings(ctx context.Context, a *archive) error {
 	for _, f := range a.zip.File {
 		name := settingsKind(f.Name)
