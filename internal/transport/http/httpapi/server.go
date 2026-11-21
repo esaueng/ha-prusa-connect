@@ -900,6 +900,7 @@ func middlewareStack(cfg Config) []func(http.Handler) http.Handler {
 		// this origin took time over and answered 500 to.
 		servedMiddleware(cfg.Served),
 		recoverMiddleware(),
+		crossSiteMiddleware(sessionCookieName(cfg), cfg.AllowedOrigins),
 		bodyLimitMiddleware(cfg.MaxBodyBytes, cfg.MaxUploadBytes),
 	}
 }

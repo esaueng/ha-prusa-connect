@@ -82,6 +82,19 @@ so one set of translations serves both.
 `faults.go` converts an error of the server into this shape. Add a new case in
 that file.
 
+A request that never runs is refused with an HTTP status and a problem
+document instead:
+
+| code | status | what it means |
+|---|---|---|
+| `graphql/REQUEST_INVALID` | 400 | the body or the URL is not a GraphQL request |
+| `graphql/QUERY_TOO_LONG` | 400 | the query text is over 64 KiB |
+| `graphql/QUERY_TOO_COMPLEX` | 400 | the query is over one of the bounds below |
+| `graphql/METHOD_NOT_ALLOWED` | 405 | a `GET` carries a mutation or a subscription. Send it as a `POST` |
+
+A query may nest 15 fields deep, select 512 fields and carry 64 aliases. A
+fragment counts once for every place it is spread, because that is what runs.
+
 ## Regenerating
 
 ```sh

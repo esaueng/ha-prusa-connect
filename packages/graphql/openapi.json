@@ -78,7 +78,7 @@
       "post": {
         "operationId": "run-graphql-operation",
         "summary": "Run a query or a mutation",
-        "description": "The address every GraphQL client posts to. The host decides who is calling before this module is reached, and every fleet read the query makes is authorized as that person, so two people running one query see what each of them may see. A query answers 200 whatever happened to its fields: what resolved is under data and every refusal is in errors, each carrying the core's own code under extensions. A body that is not a GraphQL request answers 400 instead. The host takes operate_resource on the module's instance before this is called, because a mutation may change what a printer is doing.",
+        "description": "The address every GraphQL client posts to. The host decides who is calling before this module is reached, and every fleet read the query makes is authorized as that person, so two people running one query see what each of them may see. A query answers 200 whatever happened to its fields: what resolved is under data and every refusal is in errors, each carrying the core's own code under extensions. A body that is not a GraphQL request answers 400 instead, and so does a query nested deeper than 15 fields, selecting more than 512 fields or carrying more than 64 aliases. The host takes operate_resource on the module's instance before this is called, because a mutation may change what a printer is doing.",
         "requestBody": {
           "required": true,
           "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Request"}}}
@@ -91,7 +91,7 @@
       "get": {
         "operationId": "run-graphql-query",
         "summary": "Run a query written into the URL",
-        "description": "The same as the POST, with the query in the address instead of the body, which is what a link and a browser address bar can hold. Variables ride as one JSON object in the variables parameter. It is a read: the host takes view_resource on the module's instance before this is called, so a mutation sent this way is a mutation sent under the wrong permission and belongs on the POST.",
+        "description": "The same as the POST, with the query in the address instead of the body, which is what a link and a browser address bar can hold. Variables ride as one JSON object in the variables parameter. It is a read: the host takes view_resource on the module's instance before this is called, so a mutation or a subscription sent this way answers 405 and belongs on the POST.",
         "parameters": [
           {"name": "query", "in": "query", "required": true, "description": "The query to run, in GraphQL's own syntax.", "schema": {"type": "string"}},
           {"name": "variables", "in": "query", "description": "The values the query's variables take, as one JSON object.", "schema": {"type": "string"}},
