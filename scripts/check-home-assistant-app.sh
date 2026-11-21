@@ -19,6 +19,13 @@ cleanup() {
 trap cleanup EXIT
 
 tar -xzf "$archive" -C "$work"
+if ! ruby -ryaml -e '
+  manifest = YAML.safe_load(File.read(ARGV.fetch(0)))
+  exit(manifest.is_a?(Hash) && manifest["host_network"] == true)
+' "$work/ha-prusa-connect/config.yaml"; then
+  echo 'The Home Assistant app archive must enable host networking for live cameras.' >&2
+  exit 1
+fi
 # Copying the app over Samba can remove the binary's execute bit.
 chmod 0644 "$work/ha-prusa-connect/rootfs/prusa_connect"
 cat > "$work/compose.yaml" <<'YAML'
