@@ -244,17 +244,10 @@ func TestAQueryOverTheBoundsIsRefusedBeforeItRuns(t *testing.T) {
 
 	wide.WriteString("} } }")
 
-	// A fragment graph with no fields until the leaves still expands across
-	// every branch; the step bound stops it before traversal grows unbounded.
-	var branchBomb strings.Builder
-
-	branchBomb.WriteString("{ ...B0 }\n")
-
-	for level := range 16 {
-		fmt.Fprintf(&branchBomb, "fragment B%d on Query { ...B%d ...B%d }\n", level, level+1, level+1)
-	}
-
-	branchBomb.WriteString("fragment B16 on Query { __typename }\n")
+	// One fragment chain spread under every alias walks the whole chain each
+	// time. It stays inside the depth, field and alias bounds, and only the
+	// step bound stops it.
+	chain := reusedChain(60, 150)
 
 	for _, one := range []struct {
 		name  string
@@ -265,15 +258,11 @@ func TestAQueryOverTheBoundsIsRefusedBeforeItRuns(t *testing.T) {
 		{name: "more aliases than the bound", query: aliased.String(), code: "graphql/QUERY_TOO_COMPLEX"},
 		{name: "fragments that expand past the bound", query: doubling.String(), code: "graphql/QUERY_TOO_COMPLEX"},
 		{name: "more fields than the bound", query: wide.String(), code: "graphql/QUERY_TOO_COMPLEX"},
-		{name: "branching fragments past the step bound", query: branchBomb.String(), code: "graphql/QUERY_TOO_COMPLEX"},
+		{name: "a reused fragment chain past the step bound", query: chain, code: "graphql/QUERY_TOO_COMPLEX"},
 		{
-			name:  "cyclic fragment",
+			// graphql-go overflows its stack on this one, so it never reaches it.
+			name:  "a fragment cycle",
 			query: "{ ...A } fragment A on Query { ...B } fragment B on Query { ...A }",
-			code:  "graphql/REQUEST_INVALID",
-		},
-		{
-			name:  "unknown fragment",
-			query: "{ ...Missing }",
 			code:  "graphql/REQUEST_INVALID",
 		},
 	} {
@@ -304,5 +293,56 @@ func TestAQueryOverTheBoundsIsRefusedBeforeItRuns(t *testing.T) {
 				t.Errorf("the core was asked as %q", saw.sawPrincipal)
 			}
 		})
+	}
+}
+
+// reusedChain is a query that spreads one chain of links __Type fragments
+// under aliases aliased __type fields, each ending in name. It selects
+// 2*aliases fields at depth 2 and walks about aliases*(links+2) selections.
+func reusedChain(aliases, links int) string {
+	var query strings.Builder
+
+	query.WriteString("{")
+
+	for i := range aliases {
+		fmt.Fprintf(&query, ` t%d: __type(name: "Query") { ...C0 }`, i)
+	}
+
+	query.WriteString(" }\n")
+
+	for link := range links - 1 {
+		fmt.Fprintf(&query, "fragment C%d on __Type { ...C%d }\n", link, link+1)
+	}
+
+	fmt.Fprintf(&query, "fragment C%d on __Type { name }\n", links-1)
+
+	return query.String()
+}
+
+func TestAReusedFragmentChainWithinTheBoundsRuns(t *testing.T) {
+	t.Parallel()
+
+	response, read := ask(t, start(t, fleet()), reusedChain(32, 64))
+
+	if response.Status != http.StatusOK || len(read.Errors) != 0 {
+		t.Fatalf("it answered %d: %s", response.Status, response.Body)
+	}
+}
+
+// A fragment that is not defined is graphql.Do's to refuse: the walk stops
+// there and validation answers in the errors array, as it always has.
+func TestAnUnknownFragmentIsAGraphQLError(t *testing.T) {
+	t.Parallel()
+
+	core := fleet()
+
+	response, read := ask(t, start(t, core), "{ ...Missing }")
+
+	if response.Status != http.StatusOK || len(read.Errors) == 0 {
+		t.Fatalf("it answered %d: %s", response.Status, response.Body)
+	}
+
+	if saw := core.asked(); saw.sawPrincipal != "" {
+		t.Errorf("the core was asked as %q", saw.sawPrincipal)
 	}
 }

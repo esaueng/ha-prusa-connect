@@ -21,21 +21,29 @@ import (
 // the field bound. It nests a type reference nine levels down under
 // __schema, types, fields, args and type, which is fifteen fields deep, and it
 // selects a little over two hundred fields with its fragments written out. It
-// uses no alias, so the alias bound is free to be the small one.
+// uses no alias, so the alias bound is free to be the small one. The step
+// bound counts every selection walked, fragment spreads included, so a chain
+// of fragments spread again and again costs no more than it allows.
 const (
 	maxQueryDepth   = 15
 	maxQueryFields  = 512
 	maxQueryAliases = 64
-	maxQuerySteps   = 2048
+	maxQuerySteps   = 8192
 )
 
 // errQueryTooComplex reports a query over one of the bounds above.
 var errQueryTooComplex = errors.New("the query asks for more than this module runs")
 
-// errInvalidFragment reports a fragment spread that names no fragment in the
-// document or forms a cycle. Refusing these before expansion keeps invalid
-// fragment graphs from burning traversal budget before validation runs.
-var errInvalidFragment = errors.New("the query names an unknown or cyclic fragment")
+// errUnknownFragment stops the walk at a fragment spread that names no
+// fragment in the document. bound hands such a document to graphql.Do, whose
+// validation refuses it in a GraphQL errors array before anything runs.
+var errUnknownFragment = errors.New("the query names a fragment it does not define")
+
+// errFragmentCycle refuses a fragment that spreads itself. graphql-go v0.8.1
+// does not survive one: its OverlappingFieldsCanBeMerged rule follows the cycle
+// until the goroutine's stack overflows, which ends the process, so the
+// document never reaches graphql.Do.
+var errFragmentCycle = errors.New("the query holds a fragment that spreads itself")
 
 // errWriteOverGet reports a mutation or a subscription sent as a GET or HEAD.
 var errWriteOverGet = errors.New("a mutation or a subscription is sent as a POST")
@@ -102,6 +110,10 @@ func bound(document *ast.Document) error {
 		}
 
 		if err := count.selections(op.SelectionSet, 0); err != nil {
+			if errors.Is(err, errUnknownFragment) {
+				return nil
+			}
+
 			return err
 		}
 	}
@@ -148,18 +160,18 @@ func (c *counter) selection(selection ast.Selection, depth int) error {
 		return c.selections(node.SelectionSet, depth)
 	case *ast.FragmentSpread:
 		if node.Name == nil {
-			return fmt.Errorf("%w: fragment spread has no name", errInvalidFragment)
+			return fmt.Errorf("%w: a fragment spread has no name", errUnknownFragment)
 		}
 
 		name := node.Name.Value
 
 		fragment, known := c.fragments[name]
 		if !known {
-			return fmt.Errorf("%w: fragment %q is not defined", errInvalidFragment, name)
+			return fmt.Errorf("%w: %q", errUnknownFragment, name)
 		}
 
 		if c.entered[name] {
-			return fmt.Errorf("%w: fragment %q spreads itself", errInvalidFragment, name)
+			return fmt.Errorf("%w: %q", errFragmentCycle, name)
 		}
 
 		c.entered[name] = true

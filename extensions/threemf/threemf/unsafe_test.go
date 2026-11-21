@@ -179,6 +179,13 @@ func TestCheckSettingsRefusesAScriptOrAFolder(t *testing.T) {
 			entry: "./Metadata/./Slic3r_PE.config", key: "post_process",
 		},
 		{
+			name: "PrusaSlicer 2 script in an entry whose name ends at a NUL",
+			data: withEntry(t, ps2, "Metadata/Slic3r_PE.config\x00.txt", func(string) string {
+				return "; post_process = /bin/sh\n"
+			}),
+			entry: "Metadata/Slic3r_PE.config\x00.txt", key: "post_process",
+		},
+		{
 			name: "PrusaSlicer 3 script in an entry using a backslash separator",
 			data: withEntry(t, ps3, `Metadata\PrusaSlicer3_project.json`, func(string) string {
 				return `{"print_settings":{"post_process":["/bin/sh"]}}`
@@ -242,6 +249,20 @@ func TestCheckSettingsRefusesAScriptOrAFolder(t *testing.T) {
 				t.Fatalf("named %s in %s, want %s in %s", unsafe.Key, unsafe.Entry, c.key, c.entry)
 			}
 		})
+	}
+}
+
+// PrusaSlicer reads a settings file only at its own path, so a file of the
+// same name in another folder is not one it runs a script from.
+func TestCheckSettingsIgnoresASettingsNameInAnotherFolder(t *testing.T) {
+	t.Parallel()
+
+	data := withEntry(t, readFile(t, fixture296), "Backup/Slic3r_PE.config", func(string) string {
+		return "; post_process = /bin/sh\n"
+	})
+
+	if err := checkSettings(t, data, threemf.Limits{}); err != nil {
+		t.Fatalf("answered %v", err)
 	}
 }
 
