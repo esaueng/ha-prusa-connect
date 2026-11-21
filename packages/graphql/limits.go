@@ -26,13 +26,19 @@ const (
 	maxQueryDepth   = 15
 	maxQueryFields  = 512
 	maxQueryAliases = 64
+	maxQuerySteps   = 2048
 )
 
 // errQueryTooComplex reports a query over one of the bounds above.
 var errQueryTooComplex = errors.New("the query asks for more than this module runs")
 
-// errWriteOverGet reports a mutation or a subscription sent as a GET.
-var errWriteOverGet = errors.New("a mutation or a subscription is sent as a POST, and this GET carries one")
+// errInvalidFragment reports a fragment spread that names no fragment in the
+// document or forms a cycle. Refusing these before expansion keeps invalid
+// fragment graphs from burning traversal budget before validation runs.
+var errInvalidFragment = errors.New("the query names an unknown or cyclic fragment")
+
+// errWriteOverGet reports a mutation or a subscription sent as a GET or HEAD.
+var errWriteOverGet = errors.New("a mutation or a subscription is sent as a POST")
 
 // parsed is a query the module read before running it. A document the parser
 // refuses is nil here, and graphql.Do answers it with the syntax error.
@@ -107,10 +113,10 @@ func bound(document *ast.Document) error {
 // first bound crossed, so the walk itself costs no more than the bounds allow.
 type counter struct {
 	fragments map[string]*ast.FragmentDefinition
-	// entered holds the fragments on the path being walked. A fragment that
-	// spreads itself is a cycle, which graphql.Do refuses. The walk runs
-	// first, so it skips the cycle rather than following it.
+	// entered holds the fragments on the path being walked so a cycle is
+	// refused before it expands.
 	entered map[string]bool
+	steps   int
 	fields  int
 	aliases int
 }
@@ -130,6 +136,11 @@ func (c *counter) selections(set *ast.SelectionSet, depth int) error {
 }
 
 func (c *counter) selection(selection ast.Selection, depth int) error {
+	c.steps++
+	if c.steps > maxQuerySteps {
+		return tooComplex("expands past %d selections", maxQuerySteps)
+	}
+
 	switch node := selection.(type) {
 	case *ast.Field:
 		return c.field(node, depth+1)
@@ -137,14 +148,18 @@ func (c *counter) selection(selection ast.Selection, depth int) error {
 		return c.selections(node.SelectionSet, depth)
 	case *ast.FragmentSpread:
 		if node.Name == nil {
-			return nil
+			return fmt.Errorf("%w: fragment spread has no name", errInvalidFragment)
 		}
 
 		name := node.Name.Value
 
 		fragment, known := c.fragments[name]
-		if !known || c.entered[name] {
-			return nil
+		if !known {
+			return fmt.Errorf("%w: fragment %q is not defined", errInvalidFragment, name)
+		}
+
+		if c.entered[name] {
+			return fmt.Errorf("%w: fragment %q spreads itself", errInvalidFragment, name)
 		}
 
 		c.entered[name] = true

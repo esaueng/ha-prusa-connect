@@ -204,8 +204,26 @@ func TestAnAPICredentialSpeaksForItsPrincipalUntilItIsRevoked(t *testing.T) {
 		theirs := srv.mint(t, admin, `{"name":"the administrator's"}`)
 
 		got := srv.as(t, bob, http.MethodDelete, "/api/v1/auth/credentials/"+theirs.ID, "")
-		if got.status != http.StatusForbidden {
-			t.Fatalf("revoking the administrator's answered %d, want 403: %s", got.status, got.body)
+		if got.status != http.StatusNotFound {
+			t.Fatalf("revoking the administrator's answered %d, want 404: %s", got.status, got.body)
+		}
+
+		unknown := srv.as(t, bob, http.MethodDelete, "/api/v1/auth/credentials/unknown-credential-id", "")
+		if unknown.status != http.StatusNotFound {
+			t.Fatalf("revoking an unknown credential answered %d, want 404: %s", unknown.status, unknown.body)
+		}
+
+		var gotProblem, unknownProblem struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(got.body, &gotProblem); err != nil {
+			t.Fatalf("parse the refusal for another person's credential: %v", err)
+		}
+		if err := json.Unmarshal(unknown.body, &unknownProblem); err != nil {
+			t.Fatalf("parse the refusal for an unknown credential: %v", err)
+		}
+		if gotProblem.Code != "core.auth/CREDENTIAL_UNKNOWN" || gotProblem.Code != unknownProblem.Code {
+			t.Fatalf("got code %q for another person's vs %q for unknown", gotProblem.Code, unknownProblem.Code)
 		}
 	})
 

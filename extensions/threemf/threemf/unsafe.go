@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 )
 
@@ -76,19 +77,40 @@ func CheckSettings(ctx context.Context, r io.ReaderAt, size int64, limits Limits
 	return checkArchiveSettings(ctx, a)
 }
 
+// normalizedEntryName cleans a ZIP entry name the way PrusaSlicer does before
+// matching settings files: backslashes become slashes, leading slashes and
+// redundant dot segments are stripped.
+func normalizedEntryName(raw string) string {
+	slashed := strings.ReplaceAll(raw, "\\", "/")
+	trimmed := strings.TrimLeft(slashed, "/")
+	cleaned := path.Clean(trimmed)
+
+	return strings.TrimPrefix(cleaned, "./")
+}
+
+// settingsKind reports which settings file a ZIP entry name resolves to, after
+// matching PrusaSlicer's path separator normalization and case-folding, or ""
+// when the entry is not a settings file.
+func settingsKind(raw string) string {
+	normalized := normalizedEntryName(raw)
+	base := path.Base(normalized)
+
+	for _, want := range settingsEntries() {
+		if strings.EqualFold(normalized, want) || strings.EqualFold(base, path.Base(want)) {
+			return want
+		}
+	}
+
+	return ""
+}
+
 // checkArchiveSettings checks every entry whose name is a settings file's,
-// in any case: a zip may hold two names that differ only in case, and the
-// slicer may read either.
+// in any case or path-separator spelling: a zip may hold backslashes, leading
+// slashes or duplicate entries differing only in case, and the slicer may read
+// any of them.
 func checkArchiveSettings(ctx context.Context, a *archive) error {
 	for _, f := range a.zip.File {
-		name := ""
-
-		for _, want := range settingsEntries() {
-			if strings.EqualFold(f.Name, want) {
-				name = want
-			}
-		}
-
+		name := settingsKind(f.Name)
 		if name == "" {
 			continue
 		}
