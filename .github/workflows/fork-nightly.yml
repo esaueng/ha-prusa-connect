@@ -1,0 +1,51 @@
+# The unit suite under the race detector, which Fork CI leaves out of a pull
+# request because it is slow and fails at random under load.
+
+name: Fork nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    name: Race (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [ app, demo, httpapi, authz, internal, rest ]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: authz
+          POSTGRES_PASSWORD: authz
+          POSTGRES_DB: authz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U authz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AUTHZ_TEST_POSTGRES_DSN: postgres://authz:authz@localhost:5432/authz?sslmode=disable
+      AUTHZ_REQUIRED_ENGINES: sqlite,postgres
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - run: make test-shard SHARD=${{ matrix.shard }} RACE=1
+
