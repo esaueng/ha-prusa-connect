@@ -7,8 +7,9 @@ optional extensions from Prusa Connect's marketplace.
 Download an archive from
 [GitHub Releases](https://github.com/esaueng/ha-prusa-connect/releases).
 The [Home Assistant app workflow](https://github.com/esaueng/ha-prusa-connect/actions/workflows/home-assistant-app.yml)
-builds and tests `main` daily at 08:43 UTC. It publishes a release once per
-commit after both archives pass their tests.
+builds and tests `main` daily at 08:43 UTC. It publishes the current commit
+after both archives pass their tests. Each commit can have one release.
+GitHub can disable the schedule after 60 days without repository activity.
 To build an archive from a checkout, run the following from the repository
 root with Docker Buildx. Use `amd64` for an Intel or AMD system.
 
