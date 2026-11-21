@@ -4,8 +4,11 @@ Run your fork as a local app on Home Assistant OS. This app is built on Prusa
 Connect by Prusa Research. It includes the server and web app. You can install
 optional extensions from Prusa Connect's marketplace.
 
-Get the archive from a successful
-[Home Assistant app build](https://github.com/esaueng/ha-prusa-connect/actions/workflows/home-assistant-app.yml).
+Download an archive from
+[GitHub Releases](https://github.com/esaueng/ha-prusa-connect/releases).
+The [Home Assistant app workflow](https://github.com/esaueng/ha-prusa-connect/actions/workflows/home-assistant-app.yml)
+builds and tests `main` daily at 08:43 UTC. It publishes a release once per
+commit after both archives pass their tests.
 To build an archive from a checkout, run the following from the repository
 root with Docker Buildx. Use `amd64` for an Intel or AMD system.
 
