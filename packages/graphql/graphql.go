@@ -93,7 +93,7 @@ func routes(schema *graphql.Schema) http.Handler {
 // limits.go are refused before it runs, each with a status of its own.
 func execute(w http.ResponseWriter, r *http.Request, schema *graphql.Schema, asked request) {
 	if document := parsed(asked.Query); document != nil {
-		if r.Method == http.MethodGet && writesOverGet(document, asked.Operation) {
+		if r.Method != http.MethodPost && writesOverGet(document, asked.Operation) {
 			w.Header().Set("Allow", http.MethodPost)
 			problem(w, http.StatusMethodNotAllowed, "graphql/METHOD_NOT_ALLOWED",
 				"a GraphQL write is sent as a POST", errWriteOverGet.Error())

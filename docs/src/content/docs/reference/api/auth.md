@@ -72,11 +72,11 @@ This operation has no sample: 204. The credential goes to the app on its next po
 
 `GET /api/v1/auth/login`. Start a login.
 
-Redirects to the configured issuer with a fresh state, nonce and PKCE challenge. The verifier stays on this server, which is what binds the callback to the request that started it. A deployment with no issuer refuses here rather than admitting the caller.
+Redirects to the configured issuer with a fresh state, nonce and PKCE challenge. The verifier stays on this server, which is what binds the callback to the request that started it. A deployment with no issuer refuses here rather than admitting the caller. One address may start 30 logins in ten minutes. Past that, or while the server holds as many unfinished logins as it will, the answer is 429 with Retry-After.
 
 - credential: none, the request is sent without a token. The client method is `beginLogin`
 - request body: none
-- errors: `303`, `401`, `500`, each a [problem document](../../error-codes.md)
+- errors: `303`, `401`, `429`, `500`, each a [problem document](../../error-codes.md)
 
 This operation has no sample: 303 to the issuer. The body is empty and the answer is the Location header.
 

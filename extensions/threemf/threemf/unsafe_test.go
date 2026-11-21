@@ -158,6 +158,34 @@ func TestCheckSettingsRefusesAScriptOrAFolder(t *testing.T) {
 			entry: "metadata/slic3r_pe.config", key: "post_process",
 		},
 		{
+			name: "PrusaSlicer 2 script in an entry using a backslash separator",
+			data: withEntry(t, ps2, `Metadata\Slic3r_PE.config`, func(string) string {
+				return "; post_process = /bin/sh\n"
+			}),
+			entry: `Metadata\Slic3r_PE.config`, key: "post_process",
+		},
+		{
+			name: "PrusaSlicer 2 script in an entry with a leading slash",
+			data: withEntry(t, ps2, "/Metadata/Slic3r_PE.config", func(string) string {
+				return "; post_process = /bin/sh\n"
+			}),
+			entry: "/Metadata/Slic3r_PE.config", key: "post_process",
+		},
+		{
+			name: "PrusaSlicer 2 script in an entry with a dot segment",
+			data: withEntry(t, ps2, "./Metadata/./Slic3r_PE.config", func(string) string {
+				return "; post_process = /bin/sh\n"
+			}),
+			entry: "./Metadata/./Slic3r_PE.config", key: "post_process",
+		},
+		{
+			name: "PrusaSlicer 3 script in an entry using a backslash separator",
+			data: withEntry(t, ps3, `Metadata\PrusaSlicer3_project.json`, func(string) string {
+				return `{"print_settings":{"post_process":["/bin/sh"]}}`
+			}),
+			entry: `Metadata\PrusaSlicer3_project.json`, key: "post_process",
+		},
+		{
 			name: "PrusaSlicer 2 script of one object",
 			data: withEntry(t, ps2, ps2ModelEntry, replaceOnce(t, `<object [^>]*>`,
 				`$0<metadata type="object" key="post&#95;process" value="/bin/sh"/>`)),

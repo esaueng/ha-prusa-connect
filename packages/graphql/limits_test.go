@@ -100,24 +100,28 @@ func TestAWriteInTheURLIsRefused(t *testing.T) {
 				query += "&operationName=" + url(one.operation)
 			}
 
-			response := serve(t, serves, routesapi.Request{
-				Method: http.MethodGet, Path: "/", Principal: caller, Query: query,
-			})
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				response := serve(t, serves, routesapi.Request{
+					Method: method, Path: "/", Principal: caller, Query: query,
+				})
 
-			if response.Status != http.StatusMethodNotAllowed {
-				t.Fatalf("it answered %d: %s", response.Status, response.Body)
-			}
+				if response.Status != http.StatusMethodNotAllowed {
+					t.Fatalf("%s answered %d: %s", method, response.Status, response.Body)
+				}
 
-			if allow := response.Headers["Allow"]; len(allow) != 1 || allow[0] != http.MethodPost {
-				t.Errorf("Allow reads %v", allow)
-			}
+				if allow := response.Headers["Allow"]; len(allow) != 1 || allow[0] != http.MethodPost {
+					t.Errorf("%s Allow reads %v", method, allow)
+				}
 
-			if code := refusalCode(t, response.Body); code != "graphql/METHOD_NOT_ALLOWED" {
-				t.Errorf("the refusal carries the code %q", code)
-			}
+				if method == http.MethodGet {
+					if code := refusalCode(t, response.Body); code != "graphql/METHOD_NOT_ALLOWED" {
+						t.Errorf("the refusal carries the code %q", code)
+					}
+				}
 
-			if saw := core.asked(); saw.sawVerb != "" {
-				t.Errorf("the core was sent %q", saw.sawVerb)
+				if saw := core.asked(); saw.sawVerb != "" {
+					t.Errorf("%s sent %q to the core", method, saw.sawVerb)
+				}
 			}
 		})
 	}
@@ -240,14 +244,38 @@ func TestAQueryOverTheBoundsIsRefusedBeforeItRuns(t *testing.T) {
 
 	wide.WriteString("} } }")
 
+	// A fragment graph with no fields until the leaves still expands across
+	// every branch; the step bound stops it before traversal grows unbounded.
+	var branchBomb strings.Builder
+
+	branchBomb.WriteString("{ ...B0 }\n")
+
+	for level := range 16 {
+		fmt.Fprintf(&branchBomb, "fragment B%d on Query { ...B%d ...B%d }\n", level, level+1, level+1)
+	}
+
+	branchBomb.WriteString("fragment B16 on Query { __typename }\n")
+
 	for _, one := range []struct {
 		name  string
 		query string
+		code  string
 	}{
-		{name: "deeper than the bound", query: "{ " + nested + " }"},
-		{name: "more aliases than the bound", query: aliased.String()},
-		{name: "fragments that expand past the bound", query: doubling.String()},
-		{name: "more fields than the bound", query: wide.String()},
+		{name: "deeper than the bound", query: "{ " + nested + " }", code: "graphql/QUERY_TOO_COMPLEX"},
+		{name: "more aliases than the bound", query: aliased.String(), code: "graphql/QUERY_TOO_COMPLEX"},
+		{name: "fragments that expand past the bound", query: doubling.String(), code: "graphql/QUERY_TOO_COMPLEX"},
+		{name: "more fields than the bound", query: wide.String(), code: "graphql/QUERY_TOO_COMPLEX"},
+		{name: "branching fragments past the step bound", query: branchBomb.String(), code: "graphql/QUERY_TOO_COMPLEX"},
+		{
+			name:  "cyclic fragment",
+			query: "{ ...A } fragment A on Query { ...B } fragment B on Query { ...A }",
+			code:  "graphql/REQUEST_INVALID",
+		},
+		{
+			name:  "unknown fragment",
+			query: "{ ...Missing }",
+			code:  "graphql/REQUEST_INVALID",
+		},
 	} {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
@@ -268,8 +296,8 @@ func TestAQueryOverTheBoundsIsRefusedBeforeItRuns(t *testing.T) {
 				t.Fatalf("it answered %d: %s", response.Status, response.Body)
 			}
 
-			if code := refusalCode(t, response.Body); code != "graphql/QUERY_TOO_COMPLEX" {
-				t.Errorf("the refusal carries the code %q", code)
+			if code := refusalCode(t, response.Body); code != one.code {
+				t.Errorf("the refusal carries the code %q, want %q", code, one.code)
 			}
 
 			if saw := core.asked(); saw.sawPrincipal != "" {
