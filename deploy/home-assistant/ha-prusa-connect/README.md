@@ -37,13 +37,13 @@ In Prusa Connect, open **Add a printer** and download the USB settings file.
 Check that it gives the printer the Home Assistant box's LAN address and
 published port. Load it on the printer and approve the pairing code.
 
-You can change the LAN port under the app's **Configuration > Network** if
-another service uses `8080`. The app always listens on port `8080` inside the
-container.
+The app uses the Home Assistant host network so a browser on the local
+network can receive live camera video. Keep port `8080` available on the
+host for the web app and the default printer connection.
 
 Use the first-run wizard's encryption step to turn on HTTPS for the web app
 or TLS for the printers. For a dedicated printer listener, choose port
-`8443` in the wizard and enable the `8443/tcp` mapping before pairing.
+`8443` in the wizard and keep it available on the host before pairing.
 If you enable web HTTPS, open the app's `https://` address directly.
 
 ## Back up and update
@@ -53,6 +53,27 @@ The app stores its configuration, database and print files in its private
 backups. A host administrator can edit `config.yaml` inside the app
 container and restart the app for advanced changes after setup.
 Keep file and database paths within the app's data folder.
+
+Check the listener ports before updating or rebuilding from a new archive.
+Make sure other services leave `8080` and any dedicated printer port free
+on the host. Host networking uses the server's listener ports directly,
+so the app cannot start if a port is already in use.
+
+The web app and default printer connection listen on `8080` on the host,
+even when the old mapping was blank. If you left the mapping blank to keep
+the service off the local network, keep your current version until you can
+restrict access to that port on the host.
+
+If you set a custom web port under **Configuration > Network** in an earlier
+version, restore it to `8080` before updating. This updates the **Open Web
+UI** button. If a printer used a different mapped port, update its
+connection address to the port the server listens on.
+
+A dedicated printer listener becomes reachable on the host even when its
+old port mapping was blank. To keep it private, set
+`core.connectors.<name>.config.listener.addr` to `localhost:8443` in the
+server configuration before updating. Use the listener's current port
+if it differs from `8443`.
 
 Back up the app before replacing its files in `local_apps`. Reload the app
 store and apply the update. For an archive with the same app version, use
