@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"crypto/tls"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -111,6 +113,43 @@ func TestTheAppNeverAnswersAnOperation(t *testing.T) {
 	rec := call(t, handler, http.MethodGet, healthPath, "")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"status":"ok"`)
+}
+
+// TestEveryAnswerOfTheAppRefusesToBeFramed holds the security headers on a
+// page, an asset and a refusal. A page another site can frame is a page it can
+// trick a person into clicking.
+func TestEveryAnswerOfTheAppRefusesToBeFramed(t *testing.T) {
+	t.Parallel()
+
+	handler := appFixture(t)
+
+	for _, path := range []string{"/", "/settings", "/assets/index-abc123.js", "/assets/missing.js"} {
+		rec := call(t, handler, http.MethodGet, path, "")
+
+		require.Equalf(t, appContentSecurityPolicy, rec.Header().Get("Content-Security-Policy"), "%s", path)
+		require.Containsf(t, rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'", "%s", path)
+		require.Equalf(t, "DENY", rec.Header().Get("X-Frame-Options"), "%s", path)
+		require.Equalf(t, appReferrerPolicy, rec.Header().Get("Referrer-Policy"), "%s", path)
+		require.Emptyf(t, rec.Header().Get("Strict-Transport-Security"),
+			"%s asked a browser on plain HTTP to use HTTPS only", path)
+	}
+}
+
+// TestOnlyAnAnswerOverTLSAsksForHTTPSOnly is the other direction of the HSTS
+// rule. Over TLS the browser is told to stay on HTTPS.
+func TestOnlyAnAnswerOverTLSAsksForHTTPSOnly(t *testing.T) {
+	t.Parallel()
+
+	handler := appFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "https://connect.example/settings", nil)
+	req.TLS = &tls.ConnectionState{}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, appStrictTransport, rec.Header().Get("Strict-Transport-Security"))
 }
 
 // TestTheAppIsAskedOnlyForANavigation holds the method rule the mount is

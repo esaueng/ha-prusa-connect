@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -495,7 +496,8 @@ func registerInstallModule(api huma.API, cfg Config) {
 			"so the database is as it was. `schema_version` and `migrations` say what a start that " +
 			"succeeded did to the module's own database.\n\n" +
 			"It takes configure_resource on the resource kind the manifest declares, which is the " +
-			"permission to administer that part of this server's configuration.",
+			"permission to administer that part of this server's configuration. Naming `from` takes " +
+			"the admin role on the organization.",
 		Tags:          []string{"resources"},
 		DefaultStatus: http.StatusCreated,
 		Errors:        moduleInstallErrors,
@@ -504,6 +506,10 @@ func registerInstallModule(api huma.API, cfg Config) {
 		Metadata: streams(),
 	}, func(ctx context.Context, in *installModuleInput) (*installModuleOutput, error) {
 		if err := requireModuleAdmin(ctx, cfg); err != nil {
+			return nil, err
+		}
+
+		if err := requireSourceAdmin(ctx, cfg, in.Body); err != nil {
 			return nil, err
 		}
 
@@ -660,6 +666,26 @@ func requireModuleAdmin(ctx context.Context, cfg Config) error {
 	}
 
 	return requireKindAdmin(ctx, cfg.Grants, ref.KindAsset, "the modules on this server")
+}
+
+// requireSourceAdmin refuses a release the caller names by from, unless the
+// caller holds the admin role on the organization.
+//
+// configure_resource on one kind decides what a caller may declare. It does
+// not make the caller someone who may run any program on this server. A
+// release from a URL or a path runs as the server's own user, and the kind its
+// manifest declares is chosen by whoever wrote it. A release with no from is
+// the one the marketplace offers, and an organization administrator chose that
+// marketplace (ADR-20261005-64j rule 17).
+//
+// The check runs before the installer reads anything, so a caller refused here
+// cannot learn whether a path exists on this server.
+func requireSourceAdmin(ctx context.Context, cfg Config, release ModuleRelease) error {
+	if strings.TrimSpace(release.From) == "" {
+		return nil
+	}
+
+	return requireOrgAdmin(ctx, cfg, "a module release named by its address")
 }
 
 type moduleRemovalInput struct {

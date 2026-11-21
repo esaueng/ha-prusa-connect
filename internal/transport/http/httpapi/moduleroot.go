@@ -188,9 +188,9 @@ func ModuleRootOpenAPIPath(mount string) string {
 // route and a mount beside the API all win over it, as they win over the
 // frontend. The reserved check runs first, so a path of this server's own is
 // never forwarded even if the plane claims one. A claimed path is handled as
-// moduleHandler handles one under the namespace: the same request rewrite,
-// the same resolution of the caller, the same permission on the same
-// instance.
+// moduleHandler handles one under the namespace: the caller identified before
+// anything about the module is said, the same request rewrite, and the same
+// permission on the same instance.
 func (s *Server) rootModules(cfg Config, fallback http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.Modules == nil || rootReserved(r.URL.Path) {
@@ -203,6 +203,14 @@ func (s *Server) rootModules(cfg Config, fallback http.Handler) http.Handler {
 		if !claimed || surface.Mount == "" || surface.Instance.IsZero() {
 			fallback.ServeHTTP(w, r)
 
+			return
+		}
+
+		// The caller is identified before the answer says anything about the
+		// module, so a caller with no identity gets one 401 whether the module
+		// serves or not, and never the instance the refusals below name.
+		caller, identified := s.identifyModuleCaller(w, r, cfg)
+		if !identified {
 			return
 		}
 
@@ -223,7 +231,7 @@ func (s *Server) rootModules(cfg Config, fallback http.Handler) http.Handler {
 		}
 
 		if r.URL.Path == ModuleRootOpenAPIPath(surface.Mount) {
-			s.serveRootDocument(w, r, cfg, surface)
+			s.serveRootDocument(w, r, cfg, caller, surface)
 
 			return
 		}
@@ -235,8 +243,7 @@ func (s *Server) rootModules(cfg Config, fallback http.Handler) http.Handler {
 			return
 		}
 
-		caller, allowed := s.allowModule(w, r, cfg, surface)
-		if !allowed {
+		if !s.allowModule(w, r, cfg, caller, surface) {
 			return
 		}
 
@@ -260,14 +267,16 @@ func unavailableReason(surface ModuleSurface) string {
 // asks for view_resource on the instance. This server answers it and the
 // module never does, so a module cannot publish a different document at the
 // address a generator reads.
-func (s *Server) serveRootDocument(w http.ResponseWriter, r *http.Request, cfg Config, surface ModuleSurface) {
+func (s *Server) serveRootDocument(
+	w http.ResponseWriter, r *http.Request, cfg Config, caller Caller, surface ModuleSurface,
+) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, r)
 
 		return
 	}
 
-	if _, allowed := s.allowModule(w, r, cfg, surface); !allowed {
+	if !s.allowModule(w, r, cfg, caller, surface) {
 		return
 	}
 

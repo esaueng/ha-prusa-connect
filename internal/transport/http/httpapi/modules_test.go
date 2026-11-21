@@ -248,6 +248,59 @@ func TestAModuleRouteIsRefusedForACallerWhoHoldsNothing(t *testing.T) {
 	require.False(t, reached, "the module ran for a caller who holds nothing on it")
 }
 
+// TestACallerWithNoIdentityCannotTellWhichNamespacesAreClaimed holds the
+// order: the caller is identified before the plane is asked. A claimed
+// namespace and an unclaimed one then answer the same 401, so the modules a
+// deployment runs cannot be listed without a credential.
+func TestACallerWithNoIdentityCannotTellWhichNamespacesAreClaimed(t *testing.T) {
+	t.Parallel()
+
+	instance, err := ref.Parse(moduleInstance)
+	require.NoError(t, err)
+
+	plane := &greedyPlane{instance: instance}
+	access := &fakeModuleAccess{
+		who: "user:operator", instance: instance, actions: []authz.Action{authz.ActionViewResource},
+	}
+
+	server := moduleServer(t, plane, access, "")
+
+	claimed := ask(t, server, http.MethodGet, "/api/v1/modules/"+moduleNamespace+"/spools", "")
+	require.Equal(t, http.StatusUnauthorized, claimed.Code, claimed.Body.String())
+
+	unclaimed := ask(t, newModulelessServer(t, ""), http.MethodGet,
+		"/api/v1/modules/com.github.aux.acme.other/spools", "")
+	require.Equal(t, http.StatusUnauthorized, unclaimed.Code, unclaimed.Body.String())
+
+	require.Empty(t, plane.asked, "the plane was asked about a namespace for a caller with no identity")
+	require.Empty(t, access.asked, "the graph was asked for a caller with no identity")
+}
+
+// newModulelessServer is a server with a plane that claims nothing, so an
+// identified caller is answered as for an unrouted path.
+func newModulelessServer(t *testing.T, who string) *Server {
+	t.Helper()
+
+	instance, err := ref.Parse(moduleInstance)
+	require.NoError(t, err)
+
+	plane := fakeModulePlane{namespace: moduleNamespace, instance: instance, handler: moduleEcho()}
+
+	return moduleServer(t, plane, &fakeModuleAccess{who: "user:operator", instance: instance}, who)
+}
+
+// TestAnIdentifiedCallerStillGetsAnUnroutedPathForAnUnclaimedNamespace is the
+// other direction: once the caller is identified, a namespace nothing claims
+// still answers as an unrouted path.
+func TestAnIdentifiedCallerStillGetsAnUnroutedPathForAnUnclaimedNamespace(t *testing.T) {
+	t.Parallel()
+
+	answered := ask(t, newModulelessServer(t, "user:operator"), http.MethodGet,
+		"/api/v1/modules/com.github.aux.acme.other/spools", "")
+	require.Equal(t, http.StatusNotFound, answered.Code, answered.Body.String())
+	require.Contains(t, answered.Body.String(), "ROUTE_NOT_FOUND")
+}
+
 // TestAServerWithModulesAndNoGraphDoesNotStart is the same rule one layer
 // earlier. A mount that authorizes on nothing must not be constructible, so the
 // hole cannot be opened by leaving a field out.

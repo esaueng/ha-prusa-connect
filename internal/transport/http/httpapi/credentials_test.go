@@ -428,17 +428,22 @@ func TestRevokingIsYoursForFreeAndAnotherPersonsByGrant(t *testing.T) {
 		require.Equal(t, "resource_kind:auth", grants.asked[0].String())
 	})
 
+	// The refusal is the one an id no row has, so a caller without the grant
+	// cannot tell another person's id from one nobody holds.
 	t.Run("another person's without it", func(t *testing.T) {
 		t.Parallel()
 
 		credentials := newFakeCredentials()
+		handler := serverWithCredentials(t, credentials, &grantingStore{allow: false}).Handler()
 
-		rec := call(t, serverWithCredentials(t, credentials, &grantingStore{allow: false}).Handler(),
-			http.MethodDelete, credentialsPath+"/"+othersCredentialID, "")
-
-		problem := requireProblem(t, rec, http.StatusForbidden)
-		require.Equal(t, authz.CodeAccessDenied(), problem.Code)
+		rec := call(t, handler, http.MethodDelete, credentialsPath+"/"+othersCredentialID, "")
+		problem := requireProblem(t, rec, http.StatusNotFound)
+		require.Equal(t, fault.AuthCredentialUnknown.Code(), problem.Code)
 		require.Empty(t, credentials.revoked, "a refused caller revoked a credential")
+
+		unknown := call(t, handler, http.MethodDelete, credentialsPath+"/n0Such0Cr3d3nt1al00000", "")
+		require.Equal(t, rec.Code, unknown.Code)
+		require.Equal(t, problem.Code, requireProblem(t, unknown, http.StatusNotFound).Code)
 	})
 }
 

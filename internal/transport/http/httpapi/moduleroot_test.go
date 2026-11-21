@@ -435,3 +435,46 @@ func TestAClaimedRootPrefixWithNothingBehindItAnswers503(t *testing.T) {
 	beside := ask(t, server, http.MethodGet, rootMount+"ql/spools", "")
 	require.Equal(t, http.StatusNotFound, beside.Code, beside.Body.String())
 }
+
+// TestAClaimedRootPrefixNamesNothingToACallerWithNoIdentity holds the order at
+// a root prefix. A caller with no identity gets a 401, and the answer names
+// neither the instance nor why the module is not serving.
+func TestAClaimedRootPrefixNamesNothingToACallerWithNoIdentity(t *testing.T) {
+	t.Parallel()
+
+	instance, err := ref.Parse(moduleInstance)
+	require.NoError(t, err)
+
+	for name, plane := range map[string]fakeModulePlane{
+		"not serving": {
+			namespace: moduleNamespace, instance: instance, mount: rootMount,
+			unavailable: "the module is switched on and is not serving",
+		},
+		"switched off by the key": {
+			namespace: moduleNamespace, instance: instance, mount: rootMount, modulesOff: true,
+		},
+		"serving": {
+			namespace: moduleNamespace, instance: instance, mount: rootMount, handler: moduleEcho(),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := mountConfig(nil)
+			cfg.Principals = fixedPrincipal("")
+			cfg.Modules = plane
+			cfg.ModuleAccess = &fakeModuleAccess{who: "user:operator", instance: instance}
+
+			server, newErr := New(cfg)
+			require.NoError(t, newErr)
+
+			for _, path := range []string{rootMount, rootMount + "/spools", ModuleRootOpenAPIPath(rootMount)} {
+				answered := ask(t, server, http.MethodGet, path, "")
+
+				require.Equalf(t, http.StatusUnauthorized, answered.Code, "%s: %s", path, answered.Body.String())
+				require.NotContainsf(t, answered.Body.String(), moduleInstance, "%s named the instance", path)
+				require.NotContainsf(t, answered.Body.String(), `"path"`, "%s reached the module", path)
+			}
+		})
+	}
+}

@@ -90,8 +90,8 @@ func (p modulePlane) declaredRoot(path string) (httpapi.ModuleSurface, bool) {
 }
 
 // declaredReason says why a declared module is not answering on the prefix it
-// named, in the words an operator can act on. It names nothing from disk: the
-// refusal is reachable without a credential.
+// named, in the words an operator can act on. It names nothing from disk, so
+// an identified caller without module access never sees host paths.
 func declaredReason(declared resource.Declaration) string {
 	if !declared.Spec.Enabled {
 		return "the module that claims this address is declared and switched off. " +
