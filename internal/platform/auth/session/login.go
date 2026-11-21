@@ -22,13 +22,37 @@ var (
 	ErrUnknownState = errors.New("session: unknown or spent login state")
 	// ErrLoginExpired reports a login that took longer than PendingTTL.
 	ErrLoginExpired = errors.New("session: login expired before the callback")
+	// ErrTooManyPending reports a login refused because MaxPending logins are
+	// already in flight and none of them has expired. Begin refuses the new
+	// login and keeps the ones that are waiting.
+	ErrTooManyPending error = tooManyPendingError{}
 )
+
+// tooManyPendingError is ErrTooManyPending. It has a Busy method because the HTTP
+// transport may not import this package, and it still has to answer 429 and
+// not 500.
+type tooManyPendingError struct{}
+
+func (tooManyPendingError) Error() string { return "session: too many logins are in flight" }
+
+// Busy reports that the refusal ends once logins in flight finish or expire.
+func (tooManyPendingError) Busy() bool { return true }
 
 const (
 	// PendingTTL bounds how long an unfinished login is remembered. A user has
 	// to get through the issuer's screens in this time, and an abandoned login
 	// costs nothing after it.
 	PendingTTL = 10 * time.Minute
+
+	// MaxPending bounds how many logins wait for a callback at once. Begin
+	// takes no credential, so without a bound a caller could fill memory by
+	// starting logins and never finishing them.
+	MaxPending = 1024
+
+	// sweepInterval is the least time between two sweeps of expired logins
+	// while the table has room. A sweep reads every entry, so running it on
+	// every Begin would make a burst of logins cost the square of its size.
+	sweepInterval = 30 * time.Second
 
 	// stateBytes and nonceBytes are 32 bytes each, which is 256 bits. Both
 	// values exist to be unguessable.
@@ -48,8 +72,9 @@ type Login struct {
 	subjects auth.OIDCSubjects
 	now      func() time.Time
 
-	mu      sync.Mutex
-	pending map[string]pendingLogin
+	mu        sync.Mutex
+	pending   map[string]pendingLogin
+	lastSweep time.Time
 }
 
 // Redirect is where the browser is sent to authenticate.
@@ -100,7 +125,8 @@ func (l *Login) WithSubjects(subjects auth.OIDCSubjects) *Login {
 	return l
 }
 
-// Begin starts a login and returns where to send the browser.
+// Begin starts a login and returns where to send the browser. It returns
+// ErrTooManyPending when MaxPending logins are in flight and none has expired.
 func (l *Login) Begin(_ context.Context) (Redirect, error) {
 	pkce, err := oidc.NewPKCE()
 	if err != nil {
@@ -119,12 +145,31 @@ func (l *Login) Begin(_ context.Context) (Redirect, error) {
 
 	now := l.now()
 
-	l.mu.Lock()
-	l.sweep(now)
-	l.pending[state] = pendingLogin{pkce: pkce, nonce: nonce, started: now}
-	l.mu.Unlock()
+	if err = l.remember(state, pendingLogin{pkce: pkce, nonce: nonce, started: now}); err != nil {
+		return Redirect{}, err
+	}
 
 	return Redirect{URL: l.client.AuthorizationURL(state, nonce, pkce), State: state}, nil
+}
+
+// remember records a login in flight, or refuses it when the table is full of
+// logins that have not expired. A full table refuses the newcomer rather than
+// drop a login a person is still finishing.
+func (l *Login) remember(state string, entry pendingLogin) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if len(l.pending) >= MaxPending || entry.started.Sub(l.lastSweep) >= sweepInterval {
+		l.sweep(entry.started)
+	}
+
+	if len(l.pending) >= MaxPending {
+		return ErrTooManyPending
+	}
+
+	l.pending[state] = entry
+
+	return nil
 }
 
 // Complete finishes a login: it consumes the state, exchanges the code for
@@ -202,8 +247,11 @@ func (l *Login) Pending() int {
 }
 
 // sweep drops logins nobody came back for. It runs on Begin and not on a timer,
-// so an idle server starts no goroutine.
+// so an idle server starts no goroutine. Begin calls it once per sweepInterval,
+// and again whenever the table is full.
 func (l *Login) sweep(now time.Time) {
+	l.lastSweep = now
+
 	for state, entry := range l.pending {
 		if now.Sub(entry.started) > PendingTTL {
 			delete(l.pending, state)

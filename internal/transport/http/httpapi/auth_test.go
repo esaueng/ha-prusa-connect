@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -238,6 +240,56 @@ func TestALoginThatFailedForServerReasonsIsNotACredentialRefusal(t *testing.T) {
 
 	body := requireProblem(t, rec, http.StatusInternalServerError)
 	require.Equal(t, httpfault.CodeUnexpected(), body.Code)
+}
+
+// TestOneAddressMayStartOnlySoManyLogins keeps a caller with no credential
+// from filling the server's table of logins in flight from one address. Another
+// address is still let through.
+func TestOneAddressMayStartOnlySoManyLogins(t *testing.T) {
+	t.Parallel()
+
+	handler := serverWithSessions(t, newFakeSessions(), false).Handler()
+
+	for attempt := range loginsPerAddress {
+		rec := call(t, handler, http.MethodGet, loginPath, "")
+		require.Equalf(t, http.StatusSeeOther, rec.Code, "attempt %d was refused inside the allowance", attempt+1)
+	}
+
+	rec := call(t, handler, http.MethodGet, loginPath, "")
+	body := requireProblem(t, rec, http.StatusTooManyRequests)
+	require.Equal(t, loginLimited.Code(), body.Code)
+	require.Equal(t, strconv.Itoa(int(loginAddressSpan/time.Second)), rec.Header().Get("Retry-After"))
+
+	other := httptest.NewRequest(http.MethodGet, loginPath, nil)
+	other.RemoteAddr = "198.51.100.7:4321"
+	otherRec := httptest.NewRecorder()
+	handler.ServeHTTP(otherRec, other)
+	require.Equal(t, http.StatusSeeOther, otherRec.Code, "one address's limit refused another address")
+}
+
+// busyLoginsError is how a Sessions implementation reports that it holds as many
+// logins in flight as it will.
+type busyLoginsError struct{}
+
+func (busyLoginsError) Error() string { return "too many logins are in flight" }
+
+func (busyLoginsError) Busy() bool { return true }
+
+// TestAServerFullOfLoginsAsksTheCallerToWait keeps a full table from reading
+// as the server's failure. The caller can start a login again once some finish
+// or expire.
+func TestAServerFullOfLoginsAsksTheCallerToWait(t *testing.T) {
+	t.Parallel()
+
+	sessions := newFakeSessions()
+	sessions.beginErr = fmt.Errorf("begin: %w", busyLoginsError{})
+
+	rec := call(t, serverWithSessions(t, sessions, false).Handler(), http.MethodGet, loginPath, "")
+
+	body := requireProblem(t, rec, http.StatusTooManyRequests)
+	require.Equal(t, loginLimited.Code(), body.Code)
+	require.True(t, body.Retryable)
+	require.Equal(t, strconv.Itoa(int(loginsBusyWait/time.Second)), rec.Header().Get("Retry-After"))
 }
 
 func requireSetCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
