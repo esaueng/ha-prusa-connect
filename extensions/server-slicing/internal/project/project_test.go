@@ -1,8 +1,11 @@
 package project_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -272,5 +275,188 @@ func TestPositionsPutCopiesOnTheChosenBed(t *testing.T) {
 
 	if match, ok := matched[0]; !ok || match.Instance.Object != 0 {
 		t.Fatalf("the label matched %+v", matched)
+	}
+}
+
+// scripted writes a PrusaSlicer 2 project of three cubes whose settings end
+// with the lines given.
+func scripted(t *testing.T, lines ...string) string {
+	t.Helper()
+
+	data, err := fixture.Project{
+		At:       [][2]float64{{100, 100}, {fixture.Bed1X + 100, 100}, {130, 100}},
+		Settings: append(append([]string{}, fixture.Bed200...), lines...),
+	}.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "scripted.3mf")
+	if err = os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// ps3Scripted is the PrusaSlicer 3 project of the threemf tests with a
+// post-processing script in its first setup.
+func ps3Scripted(t *testing.T) string {
+	t.Helper()
+
+	const name = "Metadata/PrusaSlicer3_project.json"
+
+	data, err := os.ReadFile(filepath.Join(
+		"..", "..", "..", "threemf", "threemf", "testdata", "prusaslicer-3.0.0-alpha12-two-setups.3mf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+
+	w := zip.NewWriter(&out)
+
+	for _, f := range r.File {
+		body, openErr := f.Open()
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+
+		text, readErr := io.ReadAll(body)
+		_ = body.Close()
+
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+
+		if f.Name == name {
+			edited := bytes.Replace(text, []byte(`"post_process": []`), []byte(`"post_process": ["/bin/sh -c id"]`), 1)
+			if bytes.Equal(edited, text) {
+				t.Fatal("the project has no empty post_process to replace")
+			}
+
+			text = edited
+		}
+
+		entry, createErr := w.Create(f.Name)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+
+		if _, err = entry.Write(text); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err = w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "ps3-scripted.3mf")
+	if err = os.WriteFile(path, out.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// A project with a post-processing script is refused before anything is
+// written for the slicer, whatever the selection, and whether or not the 3MF
+// reader can read the rest of it.
+func TestAProjectWithAScriptIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name      string
+		path      func(*testing.T) string
+		selection project.Selection
+		limits    threemf.Limits
+		key       string
+	}{
+		{"PrusaSlicer 2, whole", func(t *testing.T) string {
+			t.Helper()
+
+			return scripted(t, "post_process = /usr/bin/touch /tmp/owned")
+		}, project.Selection{}, threemf.Limits{}, "post_process"},
+		{"PrusaSlicer 2, one item", func(t *testing.T) string {
+			t.Helper()
+
+			return scripted(t, "post_process = /usr/bin/touch /tmp/owned")
+		}, project.Selection{Items: []int{0}}, threemf.Limits{}, "post_process"},
+		{"PrusaSlicer 2, too large for the reader", func(t *testing.T) string {
+			t.Helper()
+
+			return scripted(t, "post_process = /usr/bin/touch /tmp/owned")
+		}, project.Selection{}, threemf.Limits{MaxItems: 1}, "post_process"},
+		{"PrusaSlicer 2, an output name with a folder, too large for the reader", func(t *testing.T) string {
+			t.Helper()
+
+			return scripted(t, "output_filename_format = ../../owned.gcode")
+		}, project.Selection{}, threemf.Limits{MaxItems: 1}, "output_filename_format"},
+		{"PrusaSlicer 3, whole", ps3Scripted, project.Selection{}, threemf.Limits{}, "post_process"},
+		{"PrusaSlicer 3, too large for the reader", ps3Scripted, project.Selection{},
+			threemf.Limits{MaxItems: 1}, "post_process"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			src := c.path(t)
+			dst := filepath.Join(t.TempDir(), "prepared.3mf")
+
+			prepared, err := project.ThreeMF{Limits: c.limits}.Prepare(t.Context(), src, dst, c.selection)
+
+			var refused *project.UnsafeSettingsError
+			if !errors.As(err, &refused) || refused.Key != c.key {
+				t.Fatalf("answered %+v, %v", prepared, err)
+			}
+
+			if prepared.Path != "" {
+				t.Fatalf("a refused project is given to the slicer as %s", prepared.Path)
+			}
+
+			if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+				t.Fatalf("a refused project was rewritten: %v", statErr)
+			}
+		})
+	}
+}
+
+// The settings PrusaSlicer saves in every project, an empty script and the
+// default output name, are sliced as before. A project too large for the
+// reader is still sliced as saved, once its settings are checked.
+func TestTheSettingsPrusaSlicerSavesAreSliced(t *testing.T) {
+	t.Parallel()
+
+	src := scripted(t, "output_filename_format = [input_filename_base].gcode", "post_process = ")
+
+	prepared, err := project.ThreeMF{}.Prepare(t.Context(), src, filepath.Join(t.TempDir(), "p.3mf"),
+		project.Selection{})
+	if err != nil || prepared.Project == nil {
+		t.Fatalf("answered %+v, %v", prepared, err)
+	}
+
+	prepared, err = project.ThreeMF{Limits: threemf.Limits{MaxItems: 1}}.Prepare(
+		t.Context(), src, filepath.Join(t.TempDir(), "p.3mf"), project.Selection{})
+	if err != nil || prepared.Path != src || prepared.Warning == "" {
+		t.Fatalf("a project too large for the reader answered %+v, %v", prepared, err)
+	}
+}
+
+// Settings too large to check are refused, so a project too large for the
+// reader never reaches the slicer unchecked.
+func TestSettingsTooLargeToCheckAreRefused(t *testing.T) {
+	t.Parallel()
+
+	src := scripted(t, "post_process = ")
+
+	_, err := project.ThreeMF{Limits: threemf.Limits{MaxItems: 1, MaxMetadataBytes: 16}}.Prepare(
+		t.Context(), src, filepath.Join(t.TempDir(), "p.3mf"), project.Selection{})
+	if !errors.Is(err, project.ErrNotAProject) {
+		t.Fatalf("answered %v", err)
 	}
 }

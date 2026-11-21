@@ -4,6 +4,16 @@ What changed in this module, newest first. The top heading is the version
 `module.yaml` declares and the version this process reports to the host, and
 `changelog_test.go` fails when the three differ.
 
+## 0.1.12 - 2026-11-21
+
+### Added
+
+- `CheckSettings` refuses a project whose settings make PrusaSlicer run a program: a `post_process` that is not empty, or an `output_filename_format` with a folder in it. It reads only the settings files, so it checks a project too large for `Read` as well.
+
+### Fixed
+
+- `Rewrite` refuses a project that `CheckSettings` refuses, and the copy it writes keeps `post_process` empty.
+
 ## 0.1.11 - 2026-11-16
 
 ### Changed

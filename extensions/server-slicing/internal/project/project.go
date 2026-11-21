@@ -74,6 +74,25 @@ func (e *NotPrusaSlicerError) Error() string {
 	return "this project was saved by " + e.SavedBy + ", and only PrusaSlicer projects can be sliced"
 }
 
+// UnsafeSettingsError reports a project whose settings make PrusaSlicer run
+// a program, or name a G-code file in another folder. The slicer runs on the
+// server, so such a project is never given to it.
+type UnsafeSettingsError struct {
+	// Key is the setting, post_process or output_filename_format.
+	Key string
+}
+
+func (e *UnsafeSettingsError) Error() string {
+	if e.Key == "output_filename_format" {
+		return "the project's output file name has a folder in it, and the server writes the G-code to a " +
+			"name of its own. Remove the folder from Output filename format in PrusaSlicer's print " +
+			"settings and save the project again"
+	}
+
+	return "the project has a post-processing script, and the server never runs a script a project " +
+		"names. Clear Post-processing scripts in PrusaSlicer's print settings and save the project again"
+}
+
 // savedBy names the program that wrote a project, for a person to read.
 func savedBy(producer threemf.Producer) string {
 	switch {
@@ -197,7 +216,9 @@ type ThreeMF struct {
 // have saved another bed as the chosen one, and the command line slices that.
 //
 // A project too large for the 3MF reader is sliced as it is when the
-// selection is whole, and refused otherwise.
+// selection is whole, and refused otherwise. The settings of every project
+// are checked first, that one too, so a project with a post-processing
+// script never reaches the slicer.
 func (t ThreeMF) Prepare(ctx context.Context, src, dst string, selection Selection) (Prepared, error) {
 	file, err := os.Open(src)
 	if err != nil {
@@ -209,6 +230,10 @@ func (t ThreeMF) Prepare(ctx context.Context, src, dst string, selection Selecti
 	info, err := file.Stat()
 	if err != nil {
 		return Prepared{}, fmt.Errorf("open the project: %w", err)
+	}
+
+	if err = checkSettings(ctx, file, info.Size(), t.Limits); err != nil {
+		return Prepared{}, err
 	}
 
 	read, err := threemf.Read(ctx, file, info.Size(), t.Limits)
@@ -265,6 +290,28 @@ func (t ThreeMF) Prepare(ctx context.Context, src, dst string, selection Selecti
 	return Prepared{Path: dst, Project: placed, Bed: threemf.BedRef{}}, nil
 }
 
+// checkSettings refuses a project whose settings PrusaSlicer would run a
+// program for. A settings file too large to check is refused as well,
+// because nothing else reads it before the slicer does.
+func checkSettings(ctx context.Context, src io.ReaderAt, size int64, limits threemf.Limits) error {
+	err := threemf.CheckSettings(ctx, src, size, limits)
+
+	var risky *threemf.UnsafeSettingError
+
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &risky):
+		return &UnsafeSettingsError{Key: risky.Key}
+	case errors.Is(err, threemf.ErrLimit):
+		return fmt.Errorf("%w: its settings are larger than the module checks: %w", ErrNotAProject, err)
+	case errors.Is(err, threemf.ErrFormat):
+		return fmt.Errorf("%w: %w", ErrNotAProject, err)
+	default:
+		return fmt.Errorf("check the project's settings: %w", err)
+	}
+}
+
 // readPrepared reads the project Prepare wrote.
 func readPrepared(ctx context.Context, path string, limits threemf.Limits) (*threemf.Project, error) {
 	file, err := os.Open(path)
@@ -303,7 +350,13 @@ func rewrite(
 		err = fmt.Errorf("write the prepared project: %w", closeErr)
 	}
 
+	var risky *threemf.UnsafeSettingError
+
 	switch {
+	case errors.As(err, &risky):
+		// Prepare checks the settings before it rewrites, so this answers a
+		// file that changed between the two reads.
+		return &UnsafeSettingsError{Key: risky.Key}
 	case errors.Is(err, threemf.ErrUnsupported):
 		// Prepare refuses another program's project before it rewrites, so
 		// this answers a dialect the library refuses and Prepare lets through.

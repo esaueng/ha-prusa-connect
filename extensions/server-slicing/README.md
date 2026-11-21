@@ -285,7 +285,7 @@ and the job then carries a warning.
 | `server-slicing/SOURCE_NOT_FOUND` | the project is no longer in the storage |
 | `server-slicing/SOURCE_DENIED` | the caller, or the module, may no longer read the storage |
 | `server-slicing/SOURCE_TOO_LARGE` | the project is over `max_project_mib` |
-| `server-slicing/NOT_A_PROJECT` | the file is not a 3MF project |
+| `server-slicing/NOT_A_PROJECT` | the file is not a 3MF project, or it has a post-processing script or an output folder. The message says which |
 | `server-slicing/NOT_PRUSASLICER` | another program saved the project, such as OrcaSlicer. The message names it |
 | `server-slicing/NO_SLICER` | no installed slicer can slice it. A project saved by PrusaSlicer 3 needs PrusaSlicer 3 |
 | `server-slicing/SLICER_TOO_OLD` | the version the job named is older than the one that saved the project |

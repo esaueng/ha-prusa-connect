@@ -42,6 +42,9 @@ type Selection struct {
 // satisfy is ErrSelection, and a project that does not match the file is
 // ErrMismatch.
 //
+// A project CheckSettings refuses is refused here too. The copy keeps
+// post_process empty, so the slicer runs no program for it.
+//
 // Only a PrusaSlicer project is rewritten. A project of any other dialect is
 // ErrUnsupported: this package does not make another program's file slice
 // the same way in PrusaSlicer.
@@ -72,6 +75,10 @@ func Rewrite(
 
 	a, err := openArchive(r, size, limits)
 	if err != nil {
+		return err
+	}
+
+	if err = checkArchiveSettings(ctx, a); err != nil {
 		return err
 	}
 

@@ -131,11 +131,16 @@ func (m *Manager) slice(ctx context.Context, job Job, dir string) (*Result, erro
 
 	prepared, err := m.deps.Preparer.Prepare(ctx, input, filepath.Join(dir, "prepared.3mf"), job.Selection)
 
-	var foreign *project.NotPrusaSlicerError
+	var (
+		foreign *project.NotPrusaSlicerError
+		risky   *project.UnsafeSettingsError
+	)
 
 	switch {
 	case errors.As(err, &foreign):
 		return nil, fail(CodeNotPrusaSlicer, "%s", foreign.Error())
+	case errors.As(err, &risky):
+		return nil, fail(CodeNotAProject, "%s", risky.Error())
 	case errors.Is(err, project.ErrNotAProject):
 		return nil, fail(CodeNotAProject, "the file is not a 3MF project this module reads")
 	case errors.Is(err, project.ErrSelection) && job.Selection.Whole():

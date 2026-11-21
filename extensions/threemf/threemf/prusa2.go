@@ -761,6 +761,10 @@ func (d *prusa2) rewrite(ctx context.Context, rw *rewriting) error {
 		rw.placed.shift = Point{X: -shift.X, Y: -shift.Y}
 	}
 
+	if err := rw.clearPS2Scripts(ctx); err != nil {
+		return err
+	}
+
 	err := rw.rewriteItems(ctx, func(item int, attrs *tagAttrs, selected bool) {
 		attrs.set("printable", boolAttr(selected))
 
