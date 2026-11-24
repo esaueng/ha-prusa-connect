@@ -114,6 +114,10 @@
   const project = $derived.by(() => {
     if (!job) return [];
     const items = job.selection.items?.length ?? 0;
+    const itemLabel =
+      items > 0
+        ? t('slicer.jobs.items', { count: String(items) })
+        : t('slicer.detail.everyItem');
 
     return known([
       {
@@ -126,19 +130,21 @@
         copyable: job.source.upload === undefined,
       },
       {
+        id: 'profile',
+        label: t('slicer.slice.profile'),
+        value: job.profile,
+      },
+      {
         id: 'bed',
         label: t('slicer.column.bed'),
-        value: t('slicer.jobs.bed', {
-          bed: String((job.selection.bed ?? 0) + 1),
-        }),
+        value: job.profile
+          ? undefined
+          : t('slicer.jobs.bed', { bed: String((job.selection.bed ?? 0) + 1) }),
       },
       {
         id: 'items',
         label: t('slicer.detail.items'),
-        value:
-          items > 0
-            ? t('slicer.jobs.items', { count: String(items) })
-            : t('slicer.detail.everyItem'),
+        value: job.profile ? undefined : itemLabel,
       },
       {
         id: 'target',

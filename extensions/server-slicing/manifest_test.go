@@ -40,6 +40,7 @@ func TestTheDefaultsInTheManifestAreTheDefaultsInTheCode(t *testing.T) {
 		"github_token":    "",
 		"manifest_url":    "",
 		"local_binaries":  "[]",
+		"stl_profiles":    "{}",
 	}
 
 	if len(declared) != len(inCode) {

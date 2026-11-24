@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -56,9 +57,11 @@ type Deps struct {
 	Access   Access
 	Slicers  Slicers
 	Preparer project.Preparer
-	Run      RunFunc
-	Log      *slog.Logger
-	Now      func() time.Time
+	// STLProfiles are the administrator's checked config exports, by name.
+	STLProfiles map[string]string
+	Run         RunFunc
+	Log         *slog.Logger
+	Now         func() time.Time
 }
 
 // Limits bound the work.
@@ -86,6 +89,7 @@ type Request struct {
 	Upload    []byte
 	Output    Target
 	Slicer    string
+	Profile   string
 	Selection project.Selection
 	Format    runner.Format
 	Overwrite bool
@@ -287,24 +291,52 @@ func (m *Manager) check(ctx context.Context, request Request) (*Job, error) {
 		return nil, refuse(CodeOutputDenied, "you may not write files into the storage %s", output.Storage)
 	}
 
-	if request.Slicer != "" {
-		if _, chooseErr := install.Choose(m.deps.Slicers.Installed(), request.Slicer, "", 0); chooseErr != nil {
-			return nil, refuse(CodeNoSlicer, "PrusaSlicer %s is not installed", request.Slicer)
-		}
-	} else if len(m.deps.Slicers.Installed()) == 0 {
-		return nil, refuse(
-			CodeNoSlicer,
-			"no PrusaSlicer is installed. An administrator installs one on the Slicing page",
-		)
+	if slicerErr := m.checkSlicer(request.Slicer, request.Profile); slicerErr != nil {
+		return nil, slicerErr
 	}
 
 	now := m.deps.Now().UTC()
 
 	return &Job{
 		ID: newID(), State: Queued, Progress: 0, By: request.By,
-		Source: source, Output: output, Slicer: request.Slicer, Selection: request.Selection,
+		Source: source, Output: output, Slicer: request.Slicer, Profile: request.Profile, Selection: request.Selection,
 		Format: request.Format, Overwrite: request.Overwrite, CreatedAt: now,
 	}, nil
+}
+
+const (
+	stlSlicerMajor    = 2
+	stlSlicerRequired = "STL jobs with saved INI profiles need an installed PrusaSlicer 2.x"
+)
+
+func (m *Manager) checkSlicer(requested, profile string) error {
+	if _, err := m.chooseSlicer(requested, profile, 0); err != nil {
+		switch {
+		case profile != "":
+			return refuse(CodeNoSlicer, "%s", stlSlicerRequired)
+		case requested != "":
+			return refuse(CodeNoSlicer, "PrusaSlicer %s is not installed", requested)
+		default:
+			return refuse(
+				CodeNoSlicer,
+				"no PrusaSlicer is installed. An administrator installs one on the Slicing page",
+			)
+		}
+	}
+
+	return nil
+}
+
+func (m *Manager) chooseSlicer(requested, profile string, needMajor int) (install.Slicer, error) {
+	installed := m.deps.Slicers.Installed()
+	if profile != "" {
+		// PrusaSlicer 3 reads JSON where PrusaSlicer 2 reads the saved INI.
+		installed = slices.DeleteFunc(slices.Clone(installed), func(held install.Slicer) bool {
+			return held.Version.Major != stlSlicerMajor
+		})
+	}
+
+	return install.Choose(installed, requested, m.deps.Slicers.Pinned(), needMajor)
 }
 
 // places reads the source and the target of a request. A source in a storage
@@ -367,8 +399,8 @@ func (m *Manager) places(ctx context.Context, request Request) (Source, Target, 
 		source = Source{Storage: source.Storage, Path: source.Path}
 	}
 
-	if !strings.EqualFold(path.Ext(source.Name()), ".3mf") {
-		return Source{}, Target{}, refuse(CodeNotAProject, "%s is not a .3mf project", source.Name())
+	if err := m.checkSourceFormat(source, request); err != nil {
+		return Source{}, Target{}, err
 	}
 
 	if output.Storage == "" {
@@ -376,9 +408,9 @@ func (m *Manager) places(ctx context.Context, request Request) (Source, Target, 
 	}
 
 	if output.Path == "" {
-		output.Path = Stem(source.Name())
-		if source.Path != "" {
-			output.Path = Stem(source.Path)
+		output.Path = Stem(cmp.Or(source.Path, source.Name()))
+		if request.Profile != "" {
+			output.Path = strings.TrimSuffix(output.Path, path.Ext(output.Path)) + "-" + request.Profile
 		}
 	}
 
@@ -393,6 +425,26 @@ func (m *Manager) places(ctx context.Context, request Request) (Source, Target, 
 	}
 
 	return source, output, nil
+}
+
+func (m *Manager) checkSourceFormat(source Source, request Request) error {
+	switch strings.ToLower(path.Ext(source.Name())) {
+	case ".3mf":
+		if request.Profile != "" {
+			return refuse(CodeInvalid, "a 3MF project carries its own settings")
+		}
+	case ".stl":
+		if _, found := m.deps.STLProfiles[request.Profile]; !found {
+			return refuse(CodeInvalid, "choose a saved STL profile")
+		}
+		if !request.Selection.Whole() {
+			return refuse(CodeInvalid, "an STL file has no setup, bed or item selection")
+		}
+	default:
+		return refuse(CodeNotAProject, "%s is not a .3mf or .stl file", source.Name())
+	}
+
+	return nil
 }
 
 // validPath is a relative path with no empty segment and no "..".

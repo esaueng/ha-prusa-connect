@@ -8,12 +8,12 @@
 name: server-slicing
 # The two keys an extensions page prints on the card, beside the version.
 title: Server slicing
-summary: Slices 3MF projects into G-code on this server with the PrusaSlicer command line, and writes the G-code into a storage.
+summary: Slices 3MF projects and STL models into G-code on this server with the PrusaSlicer command line.
 codeowner: Prusa Research
 # The kind the one instance is declared under. It offers the service runtime,
 # which a module with a process half needs.
 kind: sink
-version: 0.2.4
+version: 0.3.0
 license: OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1
 # The major version of the protocol between this process and the host.
 contract_major: 1
@@ -105,6 +105,10 @@ options:
     type: list
     default: "[]"
     summary: Absolute paths of PrusaSlicer executables already on this machine.
+  - key: stl_profiles
+    type: object
+    default: "{}"
+    summary: Saved STL profiles. Each key names a profile and each value is the text of a PrusaSlicer config export.
 
 # Every connection the process makes outside Prusa Connect. The operator
 # reads them at install, and the marketplace checks them against the code.
@@ -139,11 +143,10 @@ ui:
       - path: slicer
         title: Slicing
         icon: layers
-    # A button on the page of a 3MF project. It opens the slice dialog on the
-    # Slicing page with that project.
+    # A button on the page of a model. It opens the slice dialog with that file.
     file_action:
       - id: slice
         title: Slice
         icon: layers
         primary: true
-        file_types: [".3mf"]
+        file_types: [".3mf", ".stl"]

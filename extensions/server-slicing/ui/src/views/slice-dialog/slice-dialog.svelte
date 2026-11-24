@@ -31,6 +31,7 @@
 
   let {
     project,
+    profiles = [],
     t,
     submit,
     onClose,
@@ -39,6 +40,7 @@
   }: {
     /** The project, as `<storage>:<path>`. */
     project: string;
+    profiles?: string[] | undefined;
     t: Translate;
     submit: (body: SubmitBody) => Promise<string | undefined>;
     onClose: () => void;
@@ -54,8 +56,11 @@
 
   const file = $derived(parseFileRef(project));
   const name = $derived(file?.path.split('/').at(-1) ?? project);
+  const stl = $derived(name.toLowerCase().endsWith('.stl'));
 
   let bed = $state('1');
+  let profile = $state('');
+  const needsProfile = $derived(stl && !profiles.includes(profile));
   let format = $state<'' | 'bgcode' | 'gcode'>('');
   let overwrite = $state(false);
   let sending = $state(false);
@@ -69,13 +74,15 @@
   ] as const;
 
   const send = async (): Promise<void> => {
-    if (file === undefined) return;
+    if (file === undefined || needsProfile) return;
     sending = true;
     sent = true;
     try {
       const id = await submit({
         source: { storage: file.storage, path: file.path },
-        selection: { setup: 0, bed: Number(bed) - 1 },
+        ...(stl
+          ? { profile }
+          : { selection: { setup: 0, bed: Number(bed) - 1 } }),
         format,
         overwrite,
       });
@@ -94,9 +101,13 @@
 >
   <DialogContent data-part="slice-dialog">
     <DialogHeader>
-      <DialogTitle>{t('slicer.slice.title')}</DialogTitle>
+      <DialogTitle
+        >{t(stl ? 'slicer.slice.titleSTL' : 'slicer.slice.title')}</DialogTitle
+      >
       <DialogDescription class="break-words">
-        {t('slicer.slice.description', { name })}
+        {t(stl ? 'slicer.slice.descriptionSTL' : 'slicer.slice.description', {
+          name,
+        })}
       </DialogDescription>
     </DialogHeader>
 
@@ -114,29 +125,53 @@
       />
     {:else}
       <div class="grid grid-cols-1 gap-4">
-        <div class="grid grid-cols-1 gap-2">
-          <Label for="{uid}-bed">{t('slicer.slice.bed')}</Label>
-          <Select bind:value={bed}>
-            <SelectTrigger id="{uid}-bed">
-              <SelectValue
-                >{t('slicer.slice.bedNumber', { n: bed })}</SelectValue
-              >
-            </SelectTrigger>
-            <SelectContent>
-              {#each BEDS as number (number)}
-                <SelectItem
-                  value={number}
-                  label={t('slicer.slice.bedNumber', { n: number })}
+        {#if stl}
+          {#if profiles.length === 0}
+            <p class="text-sm text-muted-foreground">
+              {t('slicer.slice.noProfiles')}
+            </p>
+          {:else}
+            <div class="grid grid-cols-1 gap-2">
+              <Label for="{uid}-profile">{t('slicer.slice.profile')}</Label>
+              <Select bind:value={profile}>
+                <SelectTrigger id="{uid}-profile">
+                  <SelectValue
+                    >{profile || t('slicer.slice.chooseProfile')}</SelectValue
+                  >
+                </SelectTrigger>
+                <SelectContent>
+                  {#each profiles as name (name)}
+                    <SelectItem value={name} label={name}>{name}</SelectItem>
+                  {/each}
+                </SelectContent>
+              </Select>
+            </div>
+          {/if}
+        {:else}
+          <div class="grid grid-cols-1 gap-2">
+            <Label for="{uid}-bed">{t('slicer.slice.bed')}</Label>
+            <Select bind:value={bed}>
+              <SelectTrigger id="{uid}-bed">
+                <SelectValue
+                  >{t('slicer.slice.bedNumber', { n: bed })}</SelectValue
                 >
-                  {t('slicer.slice.bedNumber', { n: number })}
-                </SelectItem>
-              {/each}
-            </SelectContent>
-          </Select>
-          <p class="text-xs text-muted-foreground">
-            {t('slicer.slice.bedHint')}
-          </p>
-        </div>
+              </SelectTrigger>
+              <SelectContent>
+                {#each BEDS as number (number)}
+                  <SelectItem
+                    value={number}
+                    label={t('slicer.slice.bedNumber', { n: number })}
+                  >
+                    {t('slicer.slice.bedNumber', { n: number })}
+                  </SelectItem>
+                {/each}
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">
+              {t('slicer.slice.bedHint')}
+            </p>
+          </div>
+        {/if}
 
         <div class="grid grid-cols-1 gap-2">
           <Label for="{uid}-format">{t('slicer.slice.format')}</Label>
@@ -144,15 +179,22 @@
             <SelectTrigger id="{uid}-format">
               <SelectValue>
                 {t(
-                  FORMATS.find((one) => one.value === format)?.key ??
-                    'slicer.slice.formatProject',
+                  format === '' && stl
+                    ? 'slicer.slice.formatProfile'
+                    : (FORMATS.find((one) => one.value === format)?.key ??
+                        'slicer.slice.formatProject'),
                 )}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {#each FORMATS as one (one.value)}
-                <SelectItem value={one.value} label={t(one.key)}>
-                  {t(one.key)}
+                {@const label = t(
+                  stl && one.value === ''
+                    ? 'slicer.slice.formatProfile'
+                    : one.key,
+                )}
+                <SelectItem value={one.value} {label}>
+                  {label}
                 </SelectItem>
               {/each}
             </SelectContent>
@@ -179,7 +221,7 @@
         {t('slicer.slice.close')}
       </Button>
       <Button
-        disabled={file === undefined || sending}
+        disabled={file === undefined || needsProfile || sending}
         onclick={() => void send()}
       >
         {t('slicer.slice.send')}

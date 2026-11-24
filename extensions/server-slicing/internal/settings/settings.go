@@ -26,16 +26,17 @@ const (
 // A field is a pointer where zero is a value an operator may mean, so an
 // absent key takes the default.
 type Settings struct {
-	MaxJobs        *int     `json:"max_jobs"`
-	MaxQueued      *int     `json:"max_queued"`
-	TimeoutMinutes *int     `json:"timeout_minutes"`
-	Threads        *int     `json:"threads"`
-	MaxProjectMiB  *int     `json:"max_project_mib"`
-	KeepJobs       *int     `json:"keep_jobs"`
-	GitHubReleases *bool    `json:"github_releases"`
-	GitHubToken    string   `json:"github_token"`
-	ManifestURL    string   `json:"manifest_url"`
-	LocalBinaries  []string `json:"local_binaries"`
+	MaxJobs        *int              `json:"max_jobs"`
+	MaxQueued      *int              `json:"max_queued"`
+	TimeoutMinutes *int              `json:"timeout_minutes"`
+	Threads        *int              `json:"threads"`
+	MaxProjectMiB  *int              `json:"max_project_mib"`
+	KeepJobs       *int              `json:"keep_jobs"`
+	GitHubReleases *bool             `json:"github_releases"`
+	GitHubToken    string            `json:"github_token"`
+	ManifestURL    string            `json:"manifest_url"`
+	LocalBinaries  []string          `json:"local_binaries"`
+	STLProfiles    map[string]string `json:"stl_profiles"`
 }
 
 // Values are the settings once checked.
@@ -50,6 +51,7 @@ type Values struct {
 	GitHubToken    string
 	ManifestURL    string
 	LocalBinaries  []string
+	STLProfiles    map[string]string
 }
 
 // ErrInvalid reports a setting outside its bounds. The module refuses to
@@ -98,6 +100,9 @@ func (s Settings) Checked() (Values, error) {
 	errs = append(errs, checkManifest(s.ManifestURL), checkBinaries(s.LocalBinaries))
 	out.ManifestURL = s.ManifestURL
 	out.LocalBinaries = s.LocalBinaries
+	profiles, err := checkedProfiles(s.STLProfiles)
+	errs = append(errs, err)
+	out.STLProfiles = profiles
 
 	if joined := errors.Join(errs...); joined != nil {
 		return Values{}, joined

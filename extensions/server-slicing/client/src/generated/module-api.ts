@@ -39,7 +39,7 @@ export interface paths {
         put?: never;
         /**
          * Slice a project sent as the body
-         * @description Takes a job that slices the 3MF project sent as the body. The server passes at most 1 MiB to a module, so a larger project is uploaded into a storage and sliced from there. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches.
+         * @description Takes a job that slices the 3MF project or STL model sent as the body. The server passes at most 1 MiB to a module, so a larger project is uploaded into a storage and sliced from there. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches.
          */
         post: operations["upload-job"];
         delete?: never;
@@ -369,6 +369,8 @@ export interface components {
             catalogue: components["schemas"]["Catalogue"];
             /** @description The settings the module could not use. */
             problems: components["schemas"]["SettingProblem"][];
+            /** @description The names of the saved profiles an STL job can use. */
+            stl_profiles?: string[];
         };
         /** @description One version to install. */
         InstallBody: {
@@ -437,6 +439,8 @@ export interface components {
             format?: "" | "bgcode" | "gcode";
             /** @description Replace a file of the same name. Without it, a job whose file exists fails. */
             overwrite?: boolean;
+            /** @description The saved profile name for an STL job. */
+            profile?: string;
         };
         /** @description Why a job failed. */
         JobError: {
@@ -577,6 +581,8 @@ export interface components {
             finished_at?: string;
             error?: components["schemas"]["JobError"];
             result?: components["schemas"]["JobResult"];
+            /** @description The saved profile name for an STL job. */
+            profile?: string;
         };
         /** @description One page of jobs, newest first. */
         JobList: {
@@ -769,7 +775,7 @@ export interface operations {
     "upload-job": {
         parameters: {
             query: {
-                /** @description The project's file name, ending in .3mf. */
+                /** @description The file name, ending in .3mf or .stl. */
                 name: string;
                 /** @description The storage the G-code goes into. */
                 output_storage: string;
@@ -787,6 +793,8 @@ export interface operations {
                 bed?: number;
                 /** @description The build items to print, such as 0,2,5. */
                 items?: string;
+                /** @description The saved profile name for an STL job. */
+                profile?: string;
             };
             header?: never;
             path?: never;

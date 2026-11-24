@@ -135,6 +135,56 @@ func TestAnUploadedProjectIsSlicedThroughTheRoutes(t *testing.T) {
 	}
 }
 
+func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
+	t.Parallel()
+
+	const name = "core-one-petg"
+	config, err := json.Marshal(map[string]any{
+		"local_binaries":  []string{stand(t)},
+		"github_releases": false,
+		"stl_profiles": map[string]string{
+			name: "printer_technology = FFF\nbed_shape = 0x0,200x0,200x200,0x200\n" +
+				"max_print_height = 200\nnozzle_diameter = 0.4\ngcode_flavor = marlin2\n" +
+				"filament_type = PETG\nlayer_height = 0.2\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := configuredRig(t, config, wirerpc.Grants{Data: t.TempDir()})
+	eventually(t, "a slicer is listed", func() bool { return len(r.module.current().Slicers.Installed()) == 1 })
+	r.host.Put("models/box.stl", []byte("mode:args"))
+
+	var versions slicers.View
+	if status := r.as(t, alice, http.MethodGet, "/slicers", nil, &versions); status != http.StatusOK ||
+		len(versions.STLProfiles) != 1 || versions.STLProfiles[0] != name {
+		t.Fatalf("the profile listing answered %d, %v", status, versions.STLProfiles)
+	}
+	var job jobs.Job
+	if status := r.as(
+		t,
+		alice,
+		http.MethodPost,
+		"/jobs",
+		[]byte(
+			`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg"}`,
+		),
+		&job,
+	); status != http.StatusAccepted {
+		t.Fatalf("the STL job answered %d", status)
+	}
+
+	done := r.waitJob(t, job.ID)
+	if done.State != jobs.Done || done.Profile != name {
+		t.Fatalf("the STL job ended as %+v", done)
+	}
+	written, ok := r.host.File(done.Result.Path)
+	if !ok || !bytes.Contains(written, []byte("--load ")) || !bytes.Contains(written, []byte("profile.ini")) ||
+		!bytes.Contains(written, []byte("input.stl")) {
+		t.Fatalf("the CLI did not receive the STL and its configuration: %q", written)
+	}
+}
+
 // A person sees and cancels their own jobs. Another person reads them as not
 // there, and an administrator sees every job.
 func TestAPersonSeesTheirOwnJobsAndAnAdministratorEveryJob(t *testing.T) {

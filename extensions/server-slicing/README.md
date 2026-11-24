@@ -5,7 +5,8 @@ line of the public PrusaSlicer. A person, a page or another program on the
 network asks for a job. The job names a project and where the G-code goes. The
 project is in one of the server's storages, or it comes with the request. A
 worker runs PrusaSlicer in a separate process and checks that it wrote a file.
-It reads the print time, the filament and the objects out of that file, and
+For an STL file the job selects a saved PrusaSlicer profile. The module reads
+the print time, the filament and the objects out of the G-code, and
 writes the file into the storage. A printer then prints it like any other
 file there.
 
@@ -66,6 +67,27 @@ which draws the Slicing page. It has a list of the PrusaSlicer versions, a list 
 | `github_token` | secret | `` | A GitHub token for reading the releases, which raises the limit of 60 requests an hour. |
 | `manifest_url` | string | `` | An https address or an absolute path of a manifest of builds you host. Empty offers none. |
 | `local_binaries` | list | `[]` | Absolute paths of PrusaSlicer executables already on this machine. |
+| `stl_profiles` | object | `{}` | Saved STL profiles. Each key names a profile and each value is the text of a PrusaSlicer config export. |
+
+### Saved profiles for STL files
+
+Select the printer, nozzle, filament and print settings in PrusaSlicer 2.x. Use
+**File → Export → Export Config** to save them as one INI file. In **Settings →
+Extensions → Server slicing**, enter its text as a value in the
+`stl_profiles` object. For example, this command makes the JSON value for
+one profile.
+
+```sh
+jq -Rs '{ "core-one-petg": . }' core-one-petg.ini
+```
+
+In **Storage**, choose **Slice** for an STL and select a profile. A REST
+client sends the same name as `profile` in the job body or the upload
+query. The default output name includes the chosen profile.
+
+Profiles take a complete config for a filament printer. Clear any
+post-processing scripts before exporting. Keep a PrusaSlicer 2.x binary
+installed to run STL jobs with these profiles.
 
 A slicer uses a lot of memory, so the module asks the host for 2560 MiB
 (`needs.memory_mib` in `module.yaml`). The operator overrides that figure per instance as `memory_mib` on the resource spec (ADR-20261027-5m4).

@@ -2,6 +2,7 @@ package settings_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,41 @@ func TestASettingOutsideItsBoundsIsRefused(t *testing.T) {
 				t.Fatalf("answered %v", err)
 			}
 		})
+	}
+}
+
+func TestSavedSTLProfiles(t *testing.T) {
+	t.Parallel()
+
+	config := "printer_technology = FFF\r\nbed_shape = 0x0,200x0,200x200,0x200\r\n" +
+		"max_print_height = 200\r\nnozzle_diameter = 0.4\r\ngcode_flavor = marlin2\r\n" +
+		"filament_type = PETG\r\nlayer_height = 0.2\r\n"
+	checked, err := (settings.Settings{STLProfiles: map[string]string{
+		"core-one-petg": config + "output_filename_format = ../../outside.gcode\npost_process = \n",
+	}}).Checked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := checked.STLProfiles["core-one-petg"]
+	if !strings.Contains(held, "filament_type = PETG") || strings.Contains(held, "output_filename_format") ||
+		strings.Contains(held, "post_process") {
+		t.Fatalf("the prepared profile holds %q", held)
+	}
+
+	for _, value := range []string{
+		config + "post_process = /usr/bin/false\n",
+		config + "post_process = \"\";/usr/bin/false\n",
+		config + "filament_type = PLA\n",
+		"[printer:Core One]\n" + config,
+		strings.ReplaceAll(config, "FFF", "SLA"),
+		"printer_technology = FFF\n",
+	} {
+		if _, err = (settings.Settings{STLProfiles: map[string]string{"test": value}}).Checked(); !errors.Is(
+			err,
+			settings.ErrInvalid,
+		) {
+			t.Errorf("an invalid config was accepted: %v", err)
+		}
 	}
 }
 

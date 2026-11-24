@@ -129,30 +129,17 @@ func (m *Manager) slice(ctx context.Context, job Job, dir string) (*Result, erro
 
 	m.step(job.ID, 0, "preparing the project", "")
 
-	prepared, err := m.deps.Preparer.Prepare(ctx, input, filepath.Join(dir, "prepared.3mf"), job.Selection)
-
-	var (
-		foreign *project.NotPrusaSlicerError
-		risky   *project.UnsafeSettingsError
-	)
-
-	switch {
-	case errors.As(err, &foreign):
-		return nil, fail(CodeNotPrusaSlicer, "%s", foreign.Error())
-	case errors.As(err, &risky):
-		return nil, fail(CodeNotAProject, "%s", risky.Error())
-	case errors.Is(err, project.ErrNotAProject):
-		return nil, fail(CodeNotAProject, "the file is not a 3MF project this module reads")
-	case errors.Is(err, project.ErrSelection) && job.Selection.Whole():
-		return nil, fail(CodeNothingToPrint, "no printable object stands whole on the first bed: %s", err.Error())
-	case errors.Is(err, project.ErrSelection):
-		return nil, fail(CodeSelection, "%s", err.Error())
-	case err != nil:
+	prepared, config, err := m.prepare(ctx, job, input, dir)
+	if err != nil {
 		return nil, err
 	}
 
-	chosen, err := install.Choose(m.deps.Slicers.Installed(), job.Slicer, m.deps.Slicers.Pinned(), prepared.Major())
+	chosen, err := m.chooseSlicer(job.Slicer, job.Profile, prepared.Major())
 	if err != nil {
+		if job.Profile != "" {
+			return nil, fail(CodeNoSlicer, "%s", stlSlicerRequired)
+		}
+
 		return nil, chooseFailure(err, prepared)
 	}
 
@@ -162,8 +149,15 @@ func (m *Manager) slice(ctx context.Context, job Job, dir string) (*Result, erro
 	m.step(job.ID, 0, "starting PrusaSlicer", chosen.Name())
 
 	ran, err := m.deps.Run(ctx, runner.Spec{
-		Binary: chosen.Binary, Args: chosen.Args, Input: prepared.Path, Dir: filepath.Join(dir, "slicer"),
-		Format: job.Format, Threads: m.limits.Threads, Timeout: m.limits.Timeout, MemoryBytes: m.limits.MemoryBytes,
+		Binary:      chosen.Binary,
+		Args:        chosen.Args,
+		Input:       prepared.Path,
+		Dir:         filepath.Join(dir, "slicer"),
+		Config:      config,
+		Format:      job.Format,
+		Threads:     m.limits.Threads,
+		Timeout:     m.limits.Timeout,
+		MemoryBytes: m.limits.MemoryBytes,
 	}, func(percent int, step string) { m.step(job.ID, percent, step, "") })
 	if err != nil {
 		return nil, err
@@ -214,6 +208,44 @@ func (m *Manager) slice(ctx context.Context, job Job, dir string) (*Result, erro
 	return result, nil
 }
 
+func (m *Manager) prepare(ctx context.Context, job Job, input, dir string) (project.Prepared, string, error) {
+	if job.Profile != "" {
+		settings, found := m.deps.STLProfiles[job.Profile]
+		if !found {
+			return project.Prepared{}, "", fail(CodeNotAProject, "the selected STL profile is unavailable")
+		}
+
+		config := filepath.Join(dir, "profile.ini")
+		if err := os.WriteFile(config, []byte(settings), 0o600); err != nil {
+			return project.Prepared{}, "", fmt.Errorf("write the STL profile: %w", err)
+		}
+
+		return project.Prepared{Path: input}, config, nil
+	}
+
+	prepared, err := m.deps.Preparer.Prepare(ctx, input, filepath.Join(dir, "prepared.3mf"), job.Selection)
+
+	var (
+		foreign *project.NotPrusaSlicerError
+		risky   *project.UnsafeSettingsError
+	)
+
+	switch {
+	case errors.As(err, &foreign):
+		err = fail(CodeNotPrusaSlicer, "%s", foreign.Error())
+	case errors.As(err, &risky):
+		err = fail(CodeNotAProject, "%s", risky.Error())
+	case errors.Is(err, project.ErrNotAProject):
+		err = fail(CodeNotAProject, "the file is not a 3MF project this module reads")
+	case errors.Is(err, project.ErrSelection) && job.Selection.Whole():
+		err = fail(CodeNothingToPrint, "no printable object stands whole on the first bed: %s", err.Error())
+	case errors.Is(err, project.ErrSelection):
+		err = fail(CodeSelection, "%s", err.Error())
+	}
+
+	return prepared, "", err
+}
+
 func chooseFailure(err error, prepared project.Prepared) error {
 	switch {
 	case errors.Is(err, install.ErrTooOld):
@@ -226,16 +258,26 @@ func chooseFailure(err error, prepared project.Prepared) error {
 // fetch puts the project into the job's directory. A project in a storage is
 // read as the module, once the server said the person may still read it.
 func (m *Manager) fetch(ctx context.Context, job Job, dir string) (string, error) {
+	input := filepath.Join(dir, "input.3mf")
+	if job.Profile != "" {
+		input = filepath.Join(dir, "input.stl")
+	}
 	if job.Source.Upload != "" {
-		return m.uploadOf(job.ID), nil
+		upload := m.uploadOf(job.ID)
+		if job.Profile == "" {
+			return upload, nil
+		}
+		if err := os.Rename(upload, input); err != nil {
+			return "", fmt.Errorf("prepare the uploaded STL: %w", err)
+		}
+
+		return input, nil
 	}
 
 	if may, err := m.may(ctx, job.By, "read_storage"); err != nil || !may {
 		return "", fail(CodeSourceDenied, "the person who asked for the job may no longer read the storage %s",
 			job.Source.Storage)
 	}
-
-	input := filepath.Join(dir, "input.3mf")
 
 	file, err := os.OpenFile(input, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {

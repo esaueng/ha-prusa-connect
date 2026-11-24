@@ -479,4 +479,44 @@ describe('the slicer page', () => {
       .toBeVisible();
     expect(address.state.slice).toBe('local:box.3mf');
   });
+
+  it('requires a saved profile and sends its name with an STL job', async () => {
+    const submit = vi.fn(() => Promise.resolve('j9'));
+    const address = at({ slice: 'local:models/box.STL' });
+    await render(SlicerPage, {
+      props: {
+        view: {
+          ...viewOf(
+            'ready',
+            { ...someSlicers, stl_profiles: ['core-one-petg'] },
+            someJobs,
+          ),
+          submit,
+        },
+        t,
+        address,
+      },
+    });
+
+    const dialog = page.getByRole('dialog');
+    const slice = dialog.getByRole('button', { name: 'Slice' });
+    await expect
+      .element(dialog.getByRole('heading', { name: 'Slice the STL' }))
+      .toBeVisible();
+    await expect.element(slice).toBeDisabled();
+    await expect
+      .element(dialog.getByText('Bed', { exact: true }))
+      .not.toBeInTheDocument();
+    await dialog.getByRole('combobox', { name: 'STL profile' }).click();
+    await page.getByRole('option', { name: 'core-one-petg' }).click();
+    await slice.click();
+
+    expect(submit).toHaveBeenCalledWith({
+      source: { storage: 'local', path: 'models/box.STL' },
+      profile: 'core-one-petg',
+      format: '',
+      overwrite: false,
+    });
+    expect(address.state).toMatchObject({ tab: 'jobs', job: 'j9' });
+  });
 });
