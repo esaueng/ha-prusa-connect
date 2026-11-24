@@ -55,6 +55,8 @@ type Spec struct {
 	Input  string
 	Dir    string
 	Config string
+	// KeepPlacement keeps the input mesh's XY coordinates on the bed.
+	KeepPlacement bool
 	// Format asks for binary or text G-code. Empty keeps what the project
 	// says.
 	Format Format
@@ -231,6 +233,9 @@ func Arguments(spec Spec, home, target string) []string {
 	out = append(out, "--export-gcode", "--datadir", filepath.Join(home, "datadir"))
 	if spec.Config != "" {
 		out = append(out, "--load", spec.Config)
+	}
+	if spec.KeepPlacement {
+		out = append(out, "--dont-arrange")
 	}
 
 	switch spec.Format {

@@ -30,6 +30,7 @@ import (
 	"github.com/prusa3d/server-slicing/internal/jobs"
 	"github.com/prusa3d/server-slicing/internal/project"
 	"github.com/prusa3d/server-slicing/internal/runner"
+	"github.com/prusa3d/server-slicing/internal/settings"
 	"github.com/prusa3d/server-slicing/internal/slicers"
 )
 
@@ -84,6 +85,7 @@ type State struct {
 	// Selections is true when a 3MF library prepares the projects.
 	Selections  bool
 	STLProfiles []string
+	PrepareBeds map[string]settings.STLBed
 	// Background is the context installs run under, which ends when the
 	// module stops rather than when the request does.
 	Background context.Context
@@ -203,6 +205,7 @@ func (s Service) listSlicers(w http.ResponseWriter, r *http.Request, state State
 
 	view := state.Slicers.View(err == nil && administrator)
 	view.STLProfiles = state.STLProfiles
+	view.PrepareBeds = state.PrepareBeds
 	answer(w, http.StatusOK, view)
 }
 
@@ -338,13 +341,14 @@ func (s Service) listJobs(w http.ResponseWriter, r *http.Request, state State, b
 
 // SubmitBody is the body of POST /jobs.
 type SubmitBody struct {
-	Source    jobs.Source       `json:"source"`
-	Output    jobs.Target       `json:"output"`
-	Slicer    string            `json:"slicer"`
-	Profile   string            `json:"profile"`
-	Selection project.Selection `json:"selection"`
-	Format    runner.Format     `json:"format"`
-	Overwrite bool              `json:"overwrite"`
+	Source        jobs.Source       `json:"source"`
+	Output        jobs.Target       `json:"output"`
+	Slicer        string            `json:"slicer"`
+	Profile       string            `json:"profile"`
+	Selection     project.Selection `json:"selection"`
+	Format        runner.Format     `json:"format"`
+	Overwrite     bool              `json:"overwrite"`
+	KeepPlacement bool              `json:"keep_placement"`
 }
 
 func (s Service) submit(w http.ResponseWriter, r *http.Request, state State, by string) {
@@ -361,7 +365,7 @@ func (s Service) submit(w http.ResponseWriter, r *http.Request, state State, by 
 
 	job, err := state.Jobs.Submit(r.Context(), jobs.Request{
 		By: by, Source: body.Source, Output: body.Output, Slicer: body.Slicer, Profile: body.Profile,
-		Selection: body.Selection, Format: body.Format, Overwrite: body.Overwrite,
+		Selection: body.Selection, Format: body.Format, Overwrite: body.Overwrite, KeepPlacement: body.KeepPlacement,
 	})
 	taken(w, job, err)
 }

@@ -371,6 +371,10 @@ export interface components {
             problems: components["schemas"]["SettingProblem"][];
             /** @description The names of the saved profiles an STL job can use. */
             stl_profiles?: string[];
+            /** @description Rectangular print volumes indexed by saved STL profile name. */
+            prepare_beds?: {
+                [key: string]: components["schemas"]["STLBed"];
+            };
         };
         /** @description One version to install. */
         InstallBody: {
@@ -441,6 +445,8 @@ export interface components {
             overwrite?: boolean;
             /** @description The saved profile name for an STL job. */
             profile?: string;
+            /** @description Keep the XY coordinates of an STL model on the build plate. */
+            keep_placement?: boolean;
         };
         /** @description Why a job failed. */
         JobError: {
@@ -583,6 +589,8 @@ export interface components {
             result?: components["schemas"]["JobResult"];
             /** @description The saved profile name for an STL job. */
             profile?: string;
+            /** @description Keep the XY coordinates of an STL model on the build plate. */
+            keep_placement?: boolean;
         };
         /** @description One page of jobs, newest first. */
         JobList: {
@@ -614,6 +622,14 @@ export interface components {
             };
             /** @description Whether sending the same request again could work. */
             retryable: boolean;
+        };
+        /** @description A rectangular print volume in millimetres. */
+        STLBed: {
+            min_x: number;
+            min_y: number;
+            max_x: number;
+            max_y: number;
+            height: number;
         };
     };
     responses: never;

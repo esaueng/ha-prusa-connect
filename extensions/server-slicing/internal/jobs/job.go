@@ -159,14 +159,15 @@ type Job struct {
 	Progress int    `json:"progress"`
 	Step     string `json:"step,omitempty"`
 	// By is who asked for the job.
-	By        string            `json:"by"`
-	Source    Source            `json:"source"`
-	Output    Target            `json:"output"`
-	Slicer    string            `json:"slicer,omitempty"`
-	Profile   string            `json:"profile,omitempty"`
-	Selection project.Selection `json:"selection"`
-	Format    runner.Format     `json:"format,omitempty"`
-	Overwrite bool              `json:"overwrite"`
+	By            string            `json:"by"`
+	Source        Source            `json:"source"`
+	Output        Target            `json:"output"`
+	Slicer        string            `json:"slicer,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
+	Selection     project.Selection `json:"selection"`
+	Format        runner.Format     `json:"format,omitempty"`
+	Overwrite     bool              `json:"overwrite"`
+	KeepPlacement bool              `json:"keep_placement,omitempty"`
 
 	CreatedAt  time.Time  `json:"created_at"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`

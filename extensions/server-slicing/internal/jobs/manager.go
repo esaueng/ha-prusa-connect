@@ -86,13 +86,14 @@ type Request struct {
 	By     string
 	Source Source
 	// Upload is the project itself, for a job whose source is an upload.
-	Upload    []byte
-	Output    Target
-	Slicer    string
-	Profile   string
-	Selection project.Selection
-	Format    runner.Format
-	Overwrite bool
+	Upload        []byte
+	Output        Target
+	Slicer        string
+	Profile       string
+	Selection     project.Selection
+	Format        runner.Format
+	Overwrite     bool
+	KeepPlacement bool
 }
 
 // RefusalError is a request the jobs did not take.
@@ -300,7 +301,7 @@ func (m *Manager) check(ctx context.Context, request Request) (*Job, error) {
 	return &Job{
 		ID: newID(), State: Queued, Progress: 0, By: request.By,
 		Source: source, Output: output, Slicer: request.Slicer, Profile: request.Profile, Selection: request.Selection,
-		Format: request.Format, Overwrite: request.Overwrite, CreatedAt: now,
+		Format: request.Format, Overwrite: request.Overwrite, KeepPlacement: request.KeepPlacement, CreatedAt: now,
 	}, nil
 }
 
@@ -430,8 +431,8 @@ func (m *Manager) places(ctx context.Context, request Request) (Source, Target, 
 func (m *Manager) checkSourceFormat(source Source, request Request) error {
 	switch strings.ToLower(path.Ext(source.Name())) {
 	case ".3mf":
-		if request.Profile != "" {
-			return refuse(CodeInvalid, "a 3MF project carries its own settings")
+		if request.Profile != "" || request.KeepPlacement {
+			return refuse(CodeInvalid, "a 3MF project carries its own settings and placement")
 		}
 	case ".stl":
 		if _, found := m.deps.STLProfiles[request.Profile]; !found {

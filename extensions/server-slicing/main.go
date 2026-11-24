@@ -60,7 +60,7 @@ import (
 // changelog_test.go holds the three together.
 const (
 	name    = "server-slicing"
-	release = extension.Version("0.3.0")
+	release = extension.Version("0.4.0")
 )
 
 // mebibyte is the unit the settings count memory in.
@@ -241,6 +241,7 @@ func (m *module) configure(ctx context.Context, sent settings.Settings, grants w
 	m.state = routes.State{
 		Ready: true, Jobs: manager, Slicers: service, Limits: limits, Background: background,
 		Selections: true, STLProfiles: slices.Sorted(maps.Keys(values.STLProfiles)),
+		PrepareBeds: settings.PrepareBeds(values.STLProfiles),
 	}
 
 	return nil

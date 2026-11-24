@@ -89,6 +89,19 @@ Profiles take a complete config for a filament printer. Clear any
 post-processing scripts before exporting. Keep a PrusaSlicer 2.x binary
 installed to run STL jobs with these profiles.
 
+### Prepare a model on the build plate
+
+Open **Slicing → Prepare**, or choose **Open in slicer** on an STL in Storage.
+Pick a saved profile with a rectangular bed. The build plate uses that
+profile's dimensions in millimetres. Use the placement controls to move,
+rotate or scale the model. The browser puts the model's lowest point on
+the bed.
+
+**Save and slice** writes the placed STL and its G-code to the selected
+storage. The saved STL has a unique name and keeps its position when opened
+again in Prepare.
+The editor takes one STL up to 20 MiB and 300,000 triangles.
+
 A slicer uses a lot of memory, so the module asks the host for 2560 MiB
 (`needs.memory_mib` in `module.yaml`). The operator overrides that figure per instance as `memory_mib` on the resource spec (ADR-20261027-5m4).
 The figure is one PrusaSlicer 3.x run of a 2 M triangle project plus the

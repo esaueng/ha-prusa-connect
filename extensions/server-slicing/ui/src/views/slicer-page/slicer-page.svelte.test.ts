@@ -19,6 +19,7 @@ import {
   updateSlicers,
   viewOf,
 } from '../../test/fakes';
+import { bed, testPrepare } from '../prepare-panel/prepare-fixtures';
 import SlicerPage from './slicer-page.svelte';
 
 const at = (state: Partial<PageState> = {}) =>
@@ -478,6 +479,42 @@ describe('the slicer page', () => {
       .element(dialog.getByText('No PrusaSlicer is installed'))
       .toBeVisible();
     expect(address.state.slice).toBe('local:box.3mf');
+  });
+
+  it('opens a model from Storage in Prepare and navigates to its slicing job', async () => {
+    const address = at({ tab: 'prepare', model: 'local:parts/bracket.stl' });
+    await render(SlicerPage, {
+      view: viewOf(
+        'ready',
+        {
+          ...adminSlicers,
+          prepare_beds: { 'core-one-petg': bed },
+        },
+        everybodysJobs,
+      ),
+      t,
+      address,
+      prepare: testPrepare,
+    });
+
+    await expect
+      .element(page.getByRole('tab', { name: 'Prepare' }))
+      .toHaveAttribute('data-state', 'active');
+    await expect
+      .element(page.getByText('bracket.stl', { exact: true }))
+      .toBeVisible();
+    const save = page.getByRole('button', { name: 'Save and slice' });
+    await expect.element(save).toBeEnabled();
+    await save.click();
+    await expect
+      .poll(() => address.state)
+      .toMatchObject({ tab: 'jobs', job: 'placed-job', model: undefined });
+    await expect
+      .element(page.getByText('This job is not listed'))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText('local: bracket-placed.stl', { exact: true }))
+      .toBeVisible();
   });
 
   it('requires a saved profile and sends its name with an STL job', async () => {

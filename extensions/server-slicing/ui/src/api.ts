@@ -22,6 +22,7 @@ export type InstallProgress = components['schemas']['InstallProgress'];
 export type Catalogue = components['schemas']['Catalogue'];
 export type Job = components['schemas']['Job'];
 export type JobList = components['schemas']['JobList'];
+export type STLBed = components['schemas']['STLBed'];
 export type SubmitBody = components['schemas']['SubmitBody'];
 
 /** The module's routes, on the host's client. */

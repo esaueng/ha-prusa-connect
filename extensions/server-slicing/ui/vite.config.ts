@@ -18,6 +18,9 @@ import { moduleBuild } from '@prusa/connect-ui/build';
 const BUNDLE_ROOT = fileURLToPath(new URL('./dist/', import.meta.url));
 const MANIFEST = fileURLToPath(new URL('../module.yaml', import.meta.url));
 const LOCALES = fileURLToPath(new URL('./src/locales/', import.meta.url));
+const THREE_LICENSE = fileURLToPath(
+  new URL('../LICENSE', import.meta.resolve('three')),
+);
 
 /**
  * Puts the module's own manifest at the root of the bundle, which is where the
@@ -41,6 +44,7 @@ const bundleManifest = () => ({
     order: 'post' as const,
     handler: () => {
       copyFileSync(MANIFEST, `${BUNDLE_ROOT}module.yaml`);
+      copyFileSync(THREE_LICENSE, `${BUNDLE_ROOT}ui/three-license.txt`);
       // The catalogues, beside the entry. The host reads
       // `locales/<lang>.json` next to `entry_url` and merges what it finds
       // under this module's namespace (frontend-i18n.md rule 7).

@@ -14,11 +14,17 @@ export default defineModule((host) => {
 
   // The Slice button on a project's page opens the slice dialog on this
   // module's page. The router reads the address on popstate only.
-  host.register.fileAction('slice', (fileRef) => {
-    const href = `${host.pageHref('slicer')}?slice=${encodeURIComponent(fileRef)}`;
+  const openFile = (query: URLSearchParams): Promise<void> => {
+    const href = `${host.pageHref('slicer')}?${query}`;
     window.history.pushState(null, '', href);
     window.dispatchEvent(new PopStateEvent('popstate'));
 
     return Promise.resolve();
-  });
+  };
+  host.register.fileAction('slice', (fileRef) =>
+    openFile(new URLSearchParams({ slice: fileRef })),
+  );
+  host.register.fileAction('prepare', (fileRef) =>
+    openFile(new URLSearchParams({ tab: 'prepare', model: fileRef })),
+  );
 });
