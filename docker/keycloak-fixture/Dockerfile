@@ -2,8 +2,8 @@
 # in, so `start-dev --import-realm` finds it without a bind mount
 # (docker-services.md says why there is none).
 #
-# Pinned by digest. quay.io/keycloak/keycloak 26.8.0 at the time of pinning.
-FROM quay.io/keycloak/keycloak:26.8.0@sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741
+# Pinned by digest. quay.io/keycloak/keycloak 26.8.2-3 at the time of pinning.
+FROM quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 
 # Owned by the uid the image runs as, so the import reads the file whatever
 # the host's umask was when it was checked out.

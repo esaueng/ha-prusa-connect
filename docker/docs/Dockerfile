@@ -44,11 +44,11 @@ COPY docs ./docs
 # hand-written links in the content pointing at the old one.
 RUN cd docs && pnpm run build:static
 
-# Digest-pinned. nginxinc/nginx-unprivileged:1.29-alpine at the time of
+# Digest-pinned. ghcr.io/nginx/nginx-unprivileged:1.30.8-alpine at the time of
 # pinning. The unprivileged variant listens on 8080, runs as uid 101 and keeps
 # its pid file and temp paths under /tmp, so the root filesystem can be
 # read-only with one tmpfs.
-FROM nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
+FROM ghcr.io/nginx/nginx-unprivileged:1.30.8-alpine@sha256:637c35e46af7bc0dd3d3bcf7162e004e13ab3b370fde7cd416e2ac410b5a985a
 
 # The one server block, over the image's own. It serves the built directory,
 # answers a missing page with the site's 404 page, and keeps a redirect
