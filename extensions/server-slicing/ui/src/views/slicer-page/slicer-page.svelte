@@ -14,7 +14,7 @@
     PageHeader,
   } from '@prusa/connect-ui/primitives';
 
-  import type { SubmitBody, Translate } from '../../api';
+  import type { Job, SubmitBody, Translate } from '../../api';
   import { PageAddress } from '../../page-address.svelte';
   import type { Tab } from '../../page-state';
   import { ReleaseActs } from '../../release-acts.svelte';
@@ -23,6 +23,8 @@
   import { ApiReference } from '../api-reference';
   import { JobDetail } from '../job-detail';
   import { JobListing } from '../job-listing';
+  import type { PrepareApi } from '../prepare-panel/prepare-api';
+  import PreparePanel from '../prepare-panel/prepare-panel.svelte';
   import { ReleaseDetail } from '../release-detail';
   import { ReleaseDialog } from '../release-dialog';
   import { ReleaseListing } from '../release-listing';
@@ -37,6 +39,7 @@
     coreBase = 'http://printers.local:8080/api/v1',
     tokensHref = '/settings/tokens',
     referenceHref = '/docs?module=com.github.aux.prusa3d.server-slicing',
+    prepare,
   }: {
     view: SlicerView;
     t: Translate;
@@ -52,6 +55,7 @@
     tokensHref?: string;
     /** The core's reference page showing this module's document. */
     referenceHref?: string;
+    prepare?: PrepareApi;
   } = $props();
 
   // A plain function declared below is hoisted, so the default above may name it.
@@ -65,8 +69,16 @@
     };
   }
 
+  const acceptedJobAge = 10_000;
+  let accepted = $state.raw<{ job: Job; until: number }>();
+
+  const openPreparedJob = (job: Job): void => {
+    accepted = { job, until: Date.now() + acceptedJobAge };
+    address.go({ tab: 'jobs', job: job.id, model: undefined });
+  };
+
   const acts = $derived(new ReleaseActs(view));
-  const state = $derived(address.state);
+  const pageState = $derived(address.state);
 
   const active = $derived(
     view.jobs?.jobs.filter(
@@ -75,18 +87,22 @@
   );
 
   const releaseRow = $derived(
-    state.release === undefined || view.slicers === undefined
+    pageState.release === undefined || view.slicers === undefined
       ? undefined
       : releaseRowsOf(view.slicers).find(
-          (row) => row.version === state.release,
+          (row) => row.version === pageState.release,
         ),
   );
 
-  const openJob = $derived(
-    state.job === undefined
-      ? undefined
-      : view.jobs?.jobs.find((job) => job.id === state.job),
-  );
+  const openJob = $derived.by(() => {
+    const id = pageState.job;
+    if (!id) return undefined;
+    const listed = view.jobs?.jobs.find((job) => job.id === id);
+    if (listed) return listed;
+    if (accepted?.job.id === id && Date.now() < accepted.until)
+      return accepted.job;
+    return undefined;
+  });
 </script>
 
 <!-- A plain click on a link to another state of this page is taken here. -->
@@ -96,7 +112,7 @@
   data-part="slicer-page"
   onclick={address.take}
 >
-  {#if state.release === undefined && state.job === undefined}
+  {#if pageState.release === undefined && pageState.job === undefined}
     <PageHeader title={t('slicer.title')} />
   {/if}
   {#if view.load === 'loading'}
@@ -109,11 +125,14 @@
         detail: view.fault?.detail,
       }}
     />
-  {:else if view.load === 'failed'}
+  {:else if view.load === 'failed' && (pageState.tab !== 'prepare' || !view.slicers || !view.jobs)}
     <FaultAlert fault={view.fault} />
   {:else if view.slicers && view.jobs}
     {@const slicers = view.slicers}
     {@const jobs = view.jobs}
+    {#if view.load === 'failed'}
+      <FaultAlert fault={view.fault} />
+    {/if}
     {#snippet slicersPanel()}
       <ReleaseListing
         {slicers}
@@ -138,10 +157,26 @@
     {#snippet apiPanel()}
       <ApiReference {apiBase} {coreBase} {tokensHref} {referenceHref} {t} />
     {/snippet}
-    {#if state.release !== undefined}
+    {#snippet preparePanel()}
+      {#if prepare}
+        {#key pageState.model}
+          <PreparePanel
+            beds={slicers.prepare_beds}
+            hasSlicer={slicers.installed.some((one) =>
+              one.version.startsWith('2.'),
+            )}
+            source={pageState.model}
+            api={prepare}
+            {t}
+            onSliced={openPreparedJob}
+          />
+        {/key}
+      {/if}
+    {/snippet}
+    {#if pageState.release !== undefined}
       <FaultAlert fault={view.actionFault} />
       <ReleaseDetail
-        version={state.release}
+        version={pageState.release}
         row={releaseRow}
         platform={slicers.platform}
         administrator={jobs.all}
@@ -149,10 +184,10 @@
         backHref={address.href({ tab: 'slicers', release: undefined })}
         {t}
       />
-    {:else if state.job !== undefined}
+    {:else if pageState.job !== undefined}
       <FaultAlert fault={view.actionFault} />
       <JobDetail
-        id={state.job}
+        id={pageState.job}
         job={openJob}
         backHref={address.href({ tab: 'jobs', job: undefined })}
         onCancel={(id: string) => void view.cancel(id)}
@@ -167,6 +202,15 @@
             label: t('slicer.tab.slicers'),
             panel: slicersPanel,
           },
+          ...(prepare
+            ? [
+                {
+                  id: 'prepare',
+                  label: t('slicer.tab.prepare'),
+                  panel: preparePanel,
+                },
+              ]
+            : []),
           {
             id: 'jobs',
             label: t('slicer.tab.jobs'),
@@ -175,7 +219,7 @@
           },
           { id: 'api', label: t('slicer.tab.api'), panel: apiPanel },
         ]}
-        active={state.tab}
+        active={pageState.tab}
         onChange={(next: string) => address.go({ tab: next as Tab })}
       />
     {/if}
@@ -184,9 +228,9 @@
 
 <ReleaseDialog {acts} {t} />
 
-{#if state.slice !== undefined}
+{#if pageState.slice !== undefined}
   <SliceDialog
-    project={state.slice}
+    project={pageState.slice}
     profiles={view.slicers?.stl_profiles}
     {t}
     submit={(body: SubmitBody) => view.submit(body)}

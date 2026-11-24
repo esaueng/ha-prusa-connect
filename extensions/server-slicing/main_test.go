@@ -14,6 +14,7 @@ import (
 	"github.com/prusa3d/server-slicing/internal/jobs"
 	"github.com/prusa3d/server-slicing/internal/routes"
 	"github.com/prusa3d/server-slicing/internal/runner"
+	"github.com/prusa3d/server-slicing/internal/settings"
 	"github.com/prusa3d/server-slicing/internal/slicers"
 )
 
@@ -157,8 +158,9 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 
 	var versions slicers.View
 	if status := r.as(t, alice, http.MethodGet, "/slicers", nil, &versions); status != http.StatusOK ||
-		len(versions.STLProfiles) != 1 || versions.STLProfiles[0] != name {
-		t.Fatalf("the profile listing answered %d, %v", status, versions.STLProfiles)
+		len(versions.STLProfiles) != 1 || versions.STLProfiles[0] != name ||
+		versions.PrepareBeds[name] != (settings.STLBed{MaxX: 200, MaxY: 200, Height: 200}) {
+		t.Fatalf("the profile listing answered %d, %v, %v", status, versions.STLProfiles, versions.PrepareBeds)
 	}
 	var job jobs.Job
 	if status := r.as(
@@ -167,7 +169,7 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 		http.MethodPost,
 		"/jobs",
 		[]byte(
-			`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg"}`,
+			`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg","keep_placement":true}`,
 		),
 		&job,
 	); status != http.StatusAccepted {
@@ -175,12 +177,12 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 	}
 
 	done := r.waitJob(t, job.ID)
-	if done.State != jobs.Done || done.Profile != name {
+	if done.State != jobs.Done || done.Profile != name || !done.KeepPlacement {
 		t.Fatalf("the STL job ended as %+v", done)
 	}
 	written, ok := r.host.File(done.Result.Path)
 	if !ok || !bytes.Contains(written, []byte("--load ")) || !bytes.Contains(written, []byte("profile.ini")) ||
-		!bytes.Contains(written, []byte("input.stl")) {
+		!bytes.Contains(written, []byte("input.stl")) || !bytes.Contains(written, []byte("--dont-arrange")) {
 		t.Fatalf("the CLI did not receive the STL and its configuration: %q", written)
 	}
 }

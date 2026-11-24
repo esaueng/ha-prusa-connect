@@ -149,15 +149,16 @@ func (m *Manager) slice(ctx context.Context, job Job, dir string) (*Result, erro
 	m.step(job.ID, 0, "starting PrusaSlicer", chosen.Name())
 
 	ran, err := m.deps.Run(ctx, runner.Spec{
-		Binary:      chosen.Binary,
-		Args:        chosen.Args,
-		Input:       prepared.Path,
-		Dir:         filepath.Join(dir, "slicer"),
-		Config:      config,
-		Format:      job.Format,
-		Threads:     m.limits.Threads,
-		Timeout:     m.limits.Timeout,
-		MemoryBytes: m.limits.MemoryBytes,
+		Binary:        chosen.Binary,
+		Args:          chosen.Args,
+		Input:         prepared.Path,
+		Dir:           filepath.Join(dir, "slicer"),
+		Config:        config,
+		KeepPlacement: job.KeepPlacement,
+		Format:        job.Format,
+		Threads:       m.limits.Threads,
+		Timeout:       m.limits.Timeout,
+		MemoryBytes:   m.limits.MemoryBytes,
 	}, func(percent int, step string) { m.step(job.ID, percent, step, "") })
 	if err != nil {
 		return nil, err

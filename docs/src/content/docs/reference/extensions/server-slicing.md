@@ -37,7 +37,7 @@ Slices 3MF projects and STL models into G-code on this server with the PrusaSlic
 
 | | |
 |---|---|
-| version | 0.3.0 |
+| version | 0.4.0 |
 | licence | OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1 |
 | module path | `github.com/prusa3d/server-slicing` |
 | namespace | `com.github.aux.prusa3d.server-slicing` |
@@ -57,6 +57,7 @@ It connects outside Prusa Connect to:
 
 - **Slicing**: a page of its own, with an entry in the sidebar
 - **Slice**: an item in the action menu of each file in storage, for `.3mf`, `.stl`
+- **Open in slicer**: an item in the action menu of each file in storage, for `.stl`
 
 ## What it needs {#what-it-needs}
 

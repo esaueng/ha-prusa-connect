@@ -348,6 +348,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "prepare_beds": {
+            "type": "object",
+            "description": "Rectangular print volumes indexed by saved STL profile name.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/STLBed"
+            }
           }
         },
         "required": [
@@ -520,6 +527,10 @@
           "profile": {
             "type": "string",
             "description": "The saved profile name for an STL job."
+          },
+          "keep_placement": {
+            "type": "boolean",
+            "description": "Keep the XY coordinates of an STL model on the build plate."
           }
         },
         "required": [
@@ -859,6 +870,10 @@
           "profile": {
             "type": "string",
             "description": "The saved profile name for an STL job."
+          },
+          "keep_placement": {
+            "type": "boolean",
+            "description": "Keep the XY coordinates of an STL model on the build plate."
           }
         },
         "required": [
@@ -965,6 +980,34 @@
           "detail",
           "params",
           "retryable"
+        ]
+      },
+      "STLBed": {
+        "type": "object",
+        "description": "A rectangular print volume in millimetres.",
+        "properties": {
+          "min_x": {
+            "type": "number"
+          },
+          "min_y": {
+            "type": "number"
+          },
+          "max_x": {
+            "type": "number"
+          },
+          "max_y": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "min_x",
+          "min_y",
+          "max_x",
+          "max_y",
+          "height"
         ]
       }
     },

@@ -9,10 +9,12 @@
   import { PageAddress } from '../../page-address.svelte';
   import { heldSession } from '../../session';
   import { SlicerStore } from '../../store.svelte';
+  import { prepareOn } from '../prepare-panel/prepare-api';
   import { SlicerPage } from '../slicer-page';
 
   const { host, api } = heldSession();
   const store = new SlicerStore(api);
+  const prepare = prepareOn(host.client, api);
   const address = new PageAddress(window);
 
   // The listings remember their columns, view and page size in the module's
@@ -49,6 +51,7 @@
   store={remembered}
   {apiBase}
   {coreBase}
+  {prepare}
   tokensHref="/settings/tokens"
   referenceHref={`/docs?module=${encodeURIComponent(namespace)}`}
 />

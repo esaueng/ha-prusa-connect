@@ -23,6 +23,7 @@ import (
 	"github.com/prusa3d/server-slicing/internal/catalog"
 	"github.com/prusa3d/server-slicing/internal/feed"
 	"github.com/prusa3d/server-slicing/internal/install"
+	"github.com/prusa3d/server-slicing/internal/settings"
 )
 
 // preferencesFile keeps what an administrator chose on the page.
@@ -408,12 +409,13 @@ func (i Installed) MarshalJSON() ([]byte, error) {
 
 // View is everything a page shows about the slicers.
 type View struct {
-	STLProfiles []string           `json:"stl_profiles,omitempty"`
-	Platform    string             `json:"platform"`
-	Installed   []Installed        `json:"installed"`
-	Available   []Offer            `json:"available"`
-	Installing  []install.Progress `json:"installing"`
-	Pinned      string             `json:"pinned,omitempty"`
+	STLProfiles []string                   `json:"stl_profiles,omitempty"`
+	PrepareBeds map[string]settings.STLBed `json:"prepare_beds,omitempty"`
+	Platform    string                     `json:"platform"`
+	Installed   []Installed                `json:"installed"`
+	Available   []Offer                    `json:"available"`
+	Installing  []install.Progress         `json:"installing"`
+	Pinned      string                     `json:"pinned,omitempty"`
 	// Default is the version a job that names none gets, and empty when
 	// nothing is installed.
 	Default string `json:"default,omitempty"`

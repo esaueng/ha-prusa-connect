@@ -18,7 +18,7 @@ import {
   type ReleaseSort,
 } from './releases';
 
-export const TABS = ['slicers', 'jobs', 'api'] as const;
+export const TABS = ['slicers', 'prepare', 'jobs', 'api'] as const;
 export type Tab = (typeof TABS)[number];
 
 export interface PageState {
@@ -36,6 +36,8 @@ export interface PageState {
    * page sends a person here with it.
    */
   slice: string | undefined;
+  /** The STL opened from Storage into Prepare. */
+  model: string | undefined;
 }
 
 export const DEFAULT_STATE: PageState = {
@@ -47,6 +49,7 @@ export const DEFAULT_STATE: PageState = {
   release: undefined,
   job: undefined,
   slice: undefined,
+  model: undefined,
 };
 
 /** The longest search the page keeps. */
@@ -118,6 +121,7 @@ export const stateOf = (search: string): PageState => {
     release: job === undefined ? release : undefined,
     job,
     slice: given(query.get('slice')),
+    model: given(query.get('model')),
   };
 };
 
@@ -142,6 +146,7 @@ export const searchOf = (state: PageState): string => {
   put('release', state.release ?? '');
   put('job', state.job ?? '');
   put('slice', state.slice ?? '');
+  put('model', state.model ?? '');
 
   const text = query.toString();
 
