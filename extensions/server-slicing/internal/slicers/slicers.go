@@ -408,11 +408,12 @@ func (i Installed) MarshalJSON() ([]byte, error) {
 
 // View is everything a page shows about the slicers.
 type View struct {
-	Platform   string             `json:"platform"`
-	Installed  []Installed        `json:"installed"`
-	Available  []Offer            `json:"available"`
-	Installing []install.Progress `json:"installing"`
-	Pinned     string             `json:"pinned,omitempty"`
+	STLProfiles []string           `json:"stl_profiles,omitempty"`
+	Platform    string             `json:"platform"`
+	Installed   []Installed        `json:"installed"`
+	Available   []Offer            `json:"available"`
+	Installing  []install.Progress `json:"installing"`
+	Pinned      string             `json:"pinned,omitempty"`
 	// Default is the version a job that names none gets, and empty when
 	// nothing is installed.
 	Default string `json:"default,omitempty"`

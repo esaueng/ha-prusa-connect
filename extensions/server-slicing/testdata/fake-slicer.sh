@@ -18,7 +18,7 @@ all="$*"
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--output) out="$2"; shift 2 ;;
-	--datadir | --threads) shift 2 ;;
+	--datadir | --threads | --load) shift 2 ;;
 	--help) echo "PrusaSlicer-2.9.6 based on Slic3r (with GUI support)"; exit 0 ;;
 	--*) shift ;;
 	*) input="$1"; shift ;;

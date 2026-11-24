@@ -9,7 +9,15 @@ rewrite:
     - cmd/generate-sdk-reference
 ---
 
-Server slicing turns a 3MF project into G-code on this server, with the command line of the public PrusaSlicer. A person picks a project in a storage, or sends one with the request, and says where the G-code goes. A worker runs PrusaSlicer in a process of its own and writes the G-code into the storage, where a printer prints it like any other file. The Slicing page lists the PrusaSlicer versions and the jobs.
+Server slicing turns a 3MF project or an STL model into G-code with PrusaSlicer.
+Choose **Slice** on a compatible file in **Storage**. A 3MF project carries its
+settings. With an STL, choose a saved PrusaSlicer 2.x profile for the printer
+and material.
+Follow the job on **Slicing → Jobs** and find its G-code in Storage.
+
+An administrator adds profiles in the Server slicing extension settings.
+Use **File → Export → Export Config** in PrusaSlicer and save the text under
+a name in `stl_profiles`.
 
 Before the first job, an administrator installs a PrusaSlicer version on the Slicing page. The extension offers the releases GitHub publishes, checks each download against its SHA-256 and keeps several versions side by side. A release that publishes no SHA-256 installs only when the administrator confirms it.
 
@@ -25,11 +33,11 @@ The README in `extensions/server-slicing` describes the manifest format, the job
 
 ## At a glance {#at-a-glance}
 
-Slices 3MF projects into G-code on this server with the PrusaSlicer command line, and writes the G-code into a storage.
+Slices 3MF projects and STL models into G-code on this server with the PrusaSlicer command line.
 
 | | |
 |---|---|
-| version | 0.2.4 |
+| version | 0.3.0 |
 | licence | OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1 |
 | module path | `github.com/prusa3d/server-slicing` |
 | namespace | `com.github.aux.prusa3d.server-slicing` |
@@ -48,7 +56,7 @@ It connects outside Prusa Connect to:
 ## What it adds {#what-it-adds}
 
 - **Slicing**: a page of its own, with an entry in the sidebar
-- **Slice**: an item in the action menu of each file in storage, for `.3mf`
+- **Slice**: an item in the action menu of each file in storage, for `.3mf`, `.stl`
 
 ## What it needs {#what-it-needs}
 
@@ -73,6 +81,7 @@ An operator writes them under `config:` in the extension's entry of the configur
 | `github_token` | secret | none | A GitHub token for reading the releases, which raises the limit of 60 requests an hour. |
 | `manifest_url` | string | none | An https address or an absolute path of a manifest of builds you host. Empty offers none. |
 | `local_binaries` | list | `[]` | Absolute paths of PrusaSlicer executables already on this machine. |
+| `stl_profiles` | object | `{}` | Saved STL profiles. Each key names a profile and each value is the text of a PrusaSlicer config export. |
 
 ## Routes {#routes}
 

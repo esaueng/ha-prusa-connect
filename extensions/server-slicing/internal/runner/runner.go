@@ -50,10 +50,11 @@ type Spec struct {
 	// before every other one.
 	Binary string
 	Args   []string
-	// Input is the 3MF project, and Dir the job's own directory. The run
-	// writes only under Dir.
-	Input string
-	Dir   string
+	// Input is the model, and Dir the job's own directory. The run writes
+	// only under Dir. Config names the checked settings for an STL input.
+	Input  string
+	Dir    string
+	Config string
 	// Format asks for binary or text G-code. Empty keeps what the project
 	// says.
 	Format Format
@@ -228,6 +229,9 @@ func Run(ctx context.Context, spec Spec, progress Progress) (Result, error) {
 func Arguments(spec Spec, home, target string) []string {
 	out := append([]string{}, spec.Args...)
 	out = append(out, "--export-gcode", "--datadir", filepath.Join(home, "datadir"))
+	if spec.Config != "" {
+		out = append(out, "--load", spec.Config)
+	}
 
 	switch spec.Format {
 	case Binary:

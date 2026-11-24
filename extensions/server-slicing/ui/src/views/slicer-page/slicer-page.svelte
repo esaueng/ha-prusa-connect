@@ -187,6 +187,7 @@
 {#if state.slice !== undefined}
   <SliceDialog
     project={state.slice}
+    profiles={view.slicers?.stl_profiles}
     {t}
     submit={(body: SubmitBody) => view.submit(body)}
     fault={view.actionFault}

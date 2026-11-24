@@ -163,6 +163,7 @@ type Job struct {
 	Source    Source            `json:"source"`
 	Output    Target            `json:"output"`
 	Slicer    string            `json:"slicer,omitempty"`
+	Profile   string            `json:"profile,omitempty"`
 	Selection project.Selection `json:"selection"`
 	Format    runner.Format     `json:"format,omitempty"`
 	Overwrite bool              `json:"overwrite"`

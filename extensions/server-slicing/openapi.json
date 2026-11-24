@@ -1428,13 +1428,13 @@
       "post": {
         "operationId": "upload-job",
         "summary": "Slice a project sent as the body",
-        "description": "Takes a job that slices the 3MF project sent as the body. The server passes at most 1 MiB to a module, so a larger project is uploaded into a storage and sliced from there. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches.",
+        "description": "Takes a job that slices the 3MF project or STL model sent as the body. The server passes at most 1 MiB to a module, so a larger project is uploaded into a storage and sliced from there. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches.",
         "parameters": [
           {
             "name": "name",
             "in": "query",
             "required": true,
-            "description": "The project's file name, ending in .3mf.",
+            "description": "The file name, ending in .3mf or .stl.",
             "schema": {
               "type": "string"
             }
@@ -1511,6 +1511,15 @@
             "in": "query",
             "required": false,
             "description": "The build items to print, such as 0,2,5.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "description": "The saved profile name for an STL job.",
             "schema": {
               "type": "string"
             }
@@ -2393,6 +2402,13 @@
             "items": {
               "$ref": "#/components/schemas/SettingProblem"
             }
+          },
+          "stl_profiles": {
+            "type": "array",
+            "description": "The names of the saved profiles an STL job can use.",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -2561,6 +2577,10 @@
           "overwrite": {
             "type": "boolean",
             "description": "Replace a file of the same name. Without it, a job whose file exists fails."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The saved profile name for an STL job."
           }
         },
         "required": [
@@ -2896,6 +2916,10 @@
           },
           "result": {
             "$ref": "#/components/schemas/JobResult"
+          },
+          "profile": {
+            "type": "string",
+            "description": "The saved profile name for an STL job."
           }
         },
         "required": [

@@ -82,7 +82,8 @@ type State struct {
 	Slicers *slicers.Service
 	Limits  Limits
 	// Selections is true when a 3MF library prepares the projects.
-	Selections bool
+	Selections  bool
+	STLProfiles []string
 	// Background is the context installs run under, which ends when the
 	// module stops rather than when the request does.
 	Background context.Context
@@ -200,7 +201,9 @@ func (s Service) status(w http.ResponseWriter, _ *http.Request, state State, _ s
 func (s Service) listSlicers(w http.ResponseWriter, r *http.Request, state State, by string) {
 	administrator, err := s.administers(r.Context(), by)
 
-	answer(w, http.StatusOK, state.Slicers.View(err == nil && administrator))
+	view := state.Slicers.View(err == nil && administrator)
+	view.STLProfiles = state.STLProfiles
+	answer(w, http.StatusOK, view)
 }
 
 // administratorView answers the slicers with the executable of each on this
@@ -338,6 +341,7 @@ type SubmitBody struct {
 	Source    jobs.Source       `json:"source"`
 	Output    jobs.Target       `json:"output"`
 	Slicer    string            `json:"slicer"`
+	Profile   string            `json:"profile"`
 	Selection project.Selection `json:"selection"`
 	Format    runner.Format     `json:"format"`
 	Overwrite bool              `json:"overwrite"`
@@ -356,7 +360,7 @@ func (s Service) submit(w http.ResponseWriter, r *http.Request, state State, by 
 	}
 
 	job, err := state.Jobs.Submit(r.Context(), jobs.Request{
-		By: by, Source: body.Source, Output: body.Output, Slicer: body.Slicer,
+		By: by, Source: body.Source, Output: body.Output, Slicer: body.Slicer, Profile: body.Profile,
 		Selection: body.Selection, Format: body.Format, Overwrite: body.Overwrite,
 	})
 	taken(w, job, err)
@@ -423,9 +427,16 @@ func (s Service) upload(w http.ResponseWriter, r *http.Request, state State, by 
 	}
 
 	job, err := state.Jobs.Submit(r.Context(), jobs.Request{
-		By: by, Source: jobs.Source{Upload: query.Get("name")}, Upload: data,
+		By:     by,
+		Source: jobs.Source{Upload: query.Get("name")},
+		Upload: data,
 		Output: jobs.Target{Storage: query.Get("output_storage"), Path: query.Get("output_path")},
-		Slicer: query.Get("slicer"), Selection: selection, Format: runner.Format(query.Get("format")),
+		Slicer: query.Get(
+			"slicer",
+		),
+		Profile:   query.Get("profile"),
+		Selection: selection,
+		Format:    runner.Format(query.Get("format")),
 		Overwrite: query.Get("overwrite") == "true",
 	})
 	taken(w, job, err)

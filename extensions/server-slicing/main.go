@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"slices"
 	"sync"
 
 	"github.com/prusa3d/prusa-connect/sdk/accessapi"
@@ -59,7 +60,7 @@ import (
 // changelog_test.go holds the three together.
 const (
 	name    = "server-slicing"
-	release = extension.Version("0.2.4")
+	release = extension.Version("0.3.0")
 )
 
 // mebibyte is the unit the settings count memory in.
@@ -218,7 +219,7 @@ func (m *module) configure(ctx context.Context, sent settings.Settings, grants w
 
 	manager, err := jobs.New(grants.Data, jobs.Deps{
 		Files: m.files, Access: m.access, Slicers: service, Preparer: project.ThreeMF{},
-		Run: runner.Run, Log: m.log,
+		Run: runner.Run, Log: m.log, STLProfiles: values.STLProfiles,
 	}, jobs.Limits{
 		Workers: values.MaxJobs, MaxQueued: values.MaxQueued, Keep: values.KeepJobs,
 		Timeout: values.Timeout, MemoryBytes: runMemory, Threads: values.Threads,
@@ -239,7 +240,7 @@ func (m *module) configure(ctx context.Context, sent settings.Settings, grants w
 
 	m.state = routes.State{
 		Ready: true, Jobs: manager, Slicers: service, Limits: limits, Background: background,
-		Selections: true,
+		Selections: true, STLProfiles: slices.Sorted(maps.Keys(values.STLProfiles)),
 	}
 
 	return nil
