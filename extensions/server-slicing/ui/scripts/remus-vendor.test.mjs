@@ -303,75 +303,75 @@ void test('the script has no command that writes', async () => {
 });
 
 const RULE = 'extensions/server-slicing/ui/vendor/remus-wasm-io/** -text';
-/** The attributes that change what a checkout writes for a file. */
-const CONTENT_ATTRIBUTES = new Set([
-  'text',
-  'eol',
-  'crlf',
-  'working-tree-encoding',
-  'ident',
-  'filter',
-]);
-
 /**
  * Holds a repository's staged copy of the vendor folder to what the vendor
- * README promises, reading only the index: the `-text` rule is the last rule
- * of the staged root `.gitattributes`, no other staged `.gitattributes` lies
- * on the way to the folder, and each staged file hashes to its line in the
- * staged SHA256SUMS. A local rule in `.git/info/attributes` cannot stand in
- * for the staged one, and a staged but uncommitted update passes.
+ * README promises. The staged `.gitattributes` files and the staged vendor
+ * folder are checked out into a fresh repository that converts every text
+ * file to CRLF (`core.autocrlf=true`, `core.eol=crlf`), with no configuration
+ * of this machine; every checked-out file must still hash to its line in the
+ * checked-out SHA256SUMS. So the staged attributes, whatever their form, must
+ * keep git from converting the folder, a rule only in `.git/info/attributes`
+ * counts for nothing, and a staged but uncommitted update passes.
  * @param {string} root
  * @param {string} vendor
- * @param {Record<string, string>} env
+ * @param {Record<string, string | undefined>} env
  */
 const assertStagedCopy = (root, vendor, env) => {
-  /** @param {string[]} args */
-  const git = (...args) =>
-    execFileSync('git', args, { cwd: root, env, maxBuffer: 64 << 20 });
-  const rel = path.relative(root, vendor).split(path.sep).join('/');
-
-  const rules = git('show', ':.gitattributes')
-    .toString('utf8')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('#'));
-  const at = rules.indexOf(RULE);
-  assert.ok(at >= 0, 'the staged .gitattributes has no -text rule');
-  // A later rule wins. None that can match a vendored file may set an
-  // attribute that changes the bytes of a checkout.
-  for (const later of rules.slice(at + 1)) {
-    const [pattern = '', ...attributes] = later.split(/\s+/u);
-    const changesBytes = attributes.some((attribute) =>
-      CONTENT_ATTRIBUTES.has(
-        attribute.replace(/^[-!]/u, '').split('=')[0] ?? '',
-      ),
-    );
-    const matches = FILES.some((name) => {
-      const file = `${rel}/${name}`;
-      return pattern.includes('/')
-        ? path.posix.matchesGlob(file, pattern.replace(/^\//u, ''))
-        : path.posix.matchesGlob(name, pattern);
+  /**
+   * @param {string} cwd
+   * @param {string[]} args
+   * @param {string} [input]
+   */
+  const git = (cwd, args, input) =>
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
+      cwd,
+      env,
+      input,
+      maxBuffer: 64 << 20,
     });
-    assert.ok(
-      !(changesBytes && matches),
-      `a later rule overrides the -text rule: ${later}`,
-    );
-  }
-  const ancestors = git('ls-files', '--', ':(glob)**/.gitattributes')
-    .toString('utf8')
-    .split('\n')
-    .filter((file) => file !== '' && file !== '.gitattributes')
-    .filter((file) => `${rel}/`.startsWith(`${path.posix.dirname(file)}/`));
-  assert.deepEqual(ancestors, [], 'another .gitattributes may override');
+  const rel = path.relative(root, vendor).split(path.sep).join('/');
+  const staged = git(root, [
+    'ls-files',
+    '--stage',
+    '--',
+    ':(glob)**/.gitattributes',
+    rel,
+  ]).toString('utf8');
+  const objects = path.resolve(
+    root,
+    git(root, ['rev-parse', '--git-path', 'objects']).toString('utf8').trim(),
+  );
 
-  const sums = git('cat-file', 'blob', `:${rel}/SHA256SUMS`).toString('utf8');
-  for (const name of FILES) {
-    const blob = git('cat-file', 'blob', `:${rel}/${name}`);
-    const hash = createHash('sha256').update(blob).digest('hex');
-    assert.ok(
-      sums.includes(`${hash}  ${name}\n`),
-      `${name} in the index is ${hash}`,
+  const checkout = mkdtempSync(path.join(tmpdir(), 'rvt-checkout-'));
+  try {
+    git(checkout, ['init', '--quiet']);
+    // The new repository reads the blobs from the one under test, and
+    // writes nothing into it.
+    writeFileSync(
+      path.join(checkout, '.git', 'objects', 'info', 'alternates'),
+      `${objects}\n`,
     );
+    git(checkout, ['update-index', '--index-info'], staged);
+    git(checkout, [
+      '-c',
+      'core.autocrlf=true',
+      '-c',
+      'core.eol=crlf',
+      'checkout-index',
+      '--all',
+      '--force',
+    ]);
+    const sums = readFileSync(path.join(checkout, rel, 'SHA256SUMS'), 'utf8');
+    for (const name of FILES) {
+      const bytes = readFileSync(path.join(checkout, rel, name));
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      assert.ok(
+        sums.includes(`${hash}  ${name}\n`),
+        `${name} checks out as ${hash}, which SHA256SUMS does not list`,
+      );
+    }
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
   }
 };
 
@@ -439,7 +439,8 @@ void test('a rule only in .git/info/attributes does not stand in for the staged 
     }).trim();
     const dir = path.join(root, path.relative(real, VENDOR));
     cpSync(VENDOR, dir, { recursive: true });
-    writeFileSync(path.join(root, '.gitattributes'), '* text=auto eol=lf\n');
+    // Text files convert on checkout here, unless a staged rule stops it.
+    writeFileSync(path.join(root, '.gitattributes'), '* text=auto\n');
     /** @param {string[]} args */
     const git = (...args) =>
       execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
@@ -451,7 +452,7 @@ void test('a rule only in .git/info/attributes does not stand in for the staged 
     git('add', '.');
     assert.throws(() => {
       assertStagedCopy(root, dir, ENV);
-    }, /the staged \.gitattributes has no -text rule/u);
+    }, /checks out as/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -516,11 +517,8 @@ void test('a git attributes file in the home of the user reaches no test git', (
 void test('a later rule that changes the bytes of a vendored file is refused, an unrelated one is not', () => {
   for (const [later, refused] of /** @type {const} */ ([
     ['*.d.ts text eol=crlf', true],
-    [
-      'extensions/server-slicing/ui/vendor/** working-tree-encoding=ISO-8859-1',
-      true,
-    ],
-    ['NOTICE ident', true],
+    ['"*.js" text eol=crlf', true],
+    ['extensions/server-slicing/ui/vendor/** text', true],
     ['docs/** text eol=crlf', false],
     ['*.wasm binary', false],
   ])) {
@@ -531,7 +529,7 @@ void test('a later rule that changes the bytes of a vendored file is refused, an
           () => {
             assertStagedCopy(root, dir, ENV);
           },
-          /a later rule overrides the -text rule/u,
+          /checks out as/u,
           later,
         );
       else assertStagedCopy(root, dir, ENV);
