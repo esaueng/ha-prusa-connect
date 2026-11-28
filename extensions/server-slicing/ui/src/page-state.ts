@@ -36,12 +36,12 @@ export interface PageState {
    * page sends a person here with it.
    */
   slice: string | undefined;
-  /** The STL opened from Storage into Prepare. */
+  /** The model opened from Storage onto the build plate. */
   model: string | undefined;
 }
 
 export const DEFAULT_STATE: PageState = {
-  tab: 'slicers',
+  tab: 'prepare',
   releases: NO_RELEASE_FILTER,
   releaseSort: DEFAULT_RELEASE_SORT,
   jobs: NO_JOB_FILTER,

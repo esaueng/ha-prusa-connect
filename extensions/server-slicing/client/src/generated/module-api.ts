@@ -375,6 +375,10 @@ export interface components {
             prepare_beds?: {
                 [key: string]: components["schemas"]["STLBed"];
             };
+            /** @description The starting print settings, indexed by saved STL profile name. */
+            prepare_settings?: {
+                [key: string]: components["schemas"]["ProfileSettings"];
+            };
         };
         /** @description One version to install. */
         InstallBody: {
@@ -447,6 +451,7 @@ export interface components {
             profile?: string;
             /** @description Keep the XY coordinates of an STL model on the build plate. */
             keep_placement?: boolean;
+            settings?: components["schemas"]["PrintSettings"];
         };
         /** @description Why a job failed. */
         JobError: {
@@ -591,6 +596,7 @@ export interface components {
             profile?: string;
             /** @description Keep the XY coordinates of an STL model on the build plate. */
             keep_placement?: boolean;
+            settings?: components["schemas"]["PrintSettings"];
         };
         /** @description One page of jobs, newest first. */
         JobList: {
@@ -630,6 +636,27 @@ export interface components {
             max_x: number;
             max_y: number;
             height: number;
+        };
+        /** @description Settings that change a saved STL profile for one job. An absent field keeps the profile's value. */
+        PrintSettings: {
+            /** @description The layer height in millimetres. A layer thicker than the nozzle is wide fails in the slicer. */
+            layer_height_mm?: number;
+            /** @description The infill density, in percent. */
+            infill_percent?: number;
+            /** @description How many perimeters each layer has. */
+            walls?: number;
+            /**
+             * @description Where the slicer may add support material: nowhere, only where it stands on the build plate, or everywhere.
+             * @enum {string}
+             */
+            supports?: "off" | "build_plate" | "everywhere";
+            /** @description The width of the brim around the first layer, in millimetres. 0 prints no brim. */
+            brim_width_mm?: number;
+        };
+        /** @description What a saved STL profile prints with before a person changes anything. A value the profile does not state is absent. */
+        ProfileSettings: components["schemas"]["PrintSettings"] & {
+            /** @description The material of the profile's first extruder, such as PETG. */
+            filament_type?: string;
         };
     };
     responses: never;

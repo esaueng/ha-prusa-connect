@@ -12,7 +12,7 @@ file there.
 
 The module ships two programs. This directory holds the Go program, which runs
 the jobs and serves the routes listed below. `ui/` holds the browser bundle,
-which draws the Slicing page. It has a list of the PrusaSlicer versions, a list of the jobs, and an API tab drawn from `openapi.json`. Each operation there names the token scope it needs in `x-scope` and the codes it refuses with in `x-codes`. Its refusal responses are written from `internal/routes`, and `openapi_test.go` holds all of it to the routes.
+which draws the Slicing page. The page opens on a build plate. Its ⋯ menu leads to a list of the PrusaSlicer versions, a list of the jobs, and an API page drawn from `openapi.json`. Each operation there names the token scope it needs in `x-scope` and the codes it refuses with in `x-codes`. Its refusal responses are written from `internal/routes`, and `openapi_test.go` holds all of it to the routes.
 
 ## Links
 
@@ -85,34 +85,86 @@ In **Storage**, choose **Slice** for an STL and select a profile. A REST
 client sends the same name as `profile` in the job body or the upload
 query. The default output name includes the chosen profile.
 
+A job may change some settings of the profile for that job alone. It sends
+them as `settings` in the body of `POST /jobs`. Each one it leaves out keeps
+the profile's value.
+
+| field | what it changes |
+|---|---|
+| `layer_height_mm` | the layer height, from 0.05 to 0.6 mm |
+| `infill_percent` | the infill density, from 0 to 100 |
+| `walls` | the perimeters of each layer, from 1 to 20 |
+| `supports` | `off`, `build_plate` for supports that stand on the bed only, or `everywhere` |
+| `brim_width_mm` | the brim, from 0 to 50 mm. 0 prints no brim |
+
+`GET /slicers` answers what each profile prints with before a change, under
+`prepare_settings`, with the material of its first extruder.
+
 Profiles take a complete config for a filament printer. Clear any
 post-processing scripts before exporting. Keep a PrusaSlicer 2.x binary
 installed to run STL jobs with these profiles.
 
-### Prepare a model on the build plate
+### Prepare a plate and print it
 
-Open **Slicing → Prepare**, or choose **Open in slicer** on an STL in Storage.
-Pick a saved profile with a rectangular bed. The build plate uses that
-profile's dimensions in millimetres. Open or drop one STL or 3MF file. The
-browser puts a new STL in the centre of the bed. It opens a 3MF in the
-positions stored in the file and combines its solid objects into one model.
-If the model extends below the bed, Prepare lifts it to the bed and keeps
-its XY position.
-The placement controls move, rotate and scale the whole model. Reset
-placement centres it and puts its lowest point on the bed.
+**Slicing** opens on the build plate of a printer. **Open in slicer** on an
+STL in Storage opens it there too. The row of tools above the plate has, in
+order:
 
-**Save and slice** writes the placed STL and its G-code to the selected
-storage. The saved STL has a unique name and keeps its position when opened
-again in Prepare. Slicing uses the selected profile. 3MF project settings,
-colours, material assignments, support and seam painting, and plate
-definitions are dropped. Prepare skips modifiers, negative volumes,
-support tools and other non-model geometry. Apply cuts made with negative
-volumes before exporting. Export one plate at a time if the project has
-several plates. If Prepare cannot read the part roles, including those in
-PrusaSlicer 3 projects, export the solid model as STL or geometry-only 3MF.
+| tool | does |
+|---|---|
+| **Add** | opens STL and 3MF files. Files dropped on the plate are added too |
+| **Move** | a part follows the pointer. Shift-click adds a part to the selection |
+| **Lay flat** | the flat face under the pointer lights up. A click turns the part so that face lies on the bed |
+| **Arrange** | arranges every part, or only the selected ones around the others, or adds a copy of the selection in free space |
+| Scale (%) | shown while parts are selected. Scales them by the same amount on every axis, from 1 to 1000 % |
+| **Undo** and the view | takes the last change back, and looks at the plate from an angle or from above |
+| printer | the printers you may see, with state, model, material and bed size. The plate takes the chosen printer's bed |
+| print settings | layer height, material, supports, infill, walls, brim and the storage for the files, kept for each printer |
+| **Print** | slices the plate and starts it on the printer |
+| ⋯ | the PrusaSlicer versions, the jobs and the API |
 
-The editor takes files up to 20 MiB and 300,000 triangles after placing
-all copies. A 3MF archive can expand to 64 MiB.
+The keys R, Delete and Ctrl+Z (⌘Z on a Mac) turn the selection by 90°,
+remove it, and take the last change back. A part that is outside the print
+volume turns red, and the plate does not print until it fits.
+
+A new STL goes to free space on the bed. Each object of a 3MF is a part of
+its own, in the position stored in the file. A part below the bed is lifted
+onto it, and a part that stands on another keeps its height. Arrange and
+**Add a copy** read each part as the rectangle around it, so an L-shaped part
+takes its whole rectangle. When a part has no room, Arrange moves nothing and
+Add a copy adds nothing, and the plate says so. Parts whose rectangles
+overlap at the same height are counted in the status line as a warning.
+
+The material is a saved profile, and the plate uses the first profile whose
+bed has the printer's size. The other settings change that profile for this
+plate, sent as `settings` with the job. Profiles take a rectangular bed. When
+the profile's bed is smaller than the printer's, the plate is the smaller
+one.
+
+**Print** saves the plate as one STL with a unique name, slices it, and sends
+the G-code to an idle printer, which starts it. Once the plate is sliced, the
+button shows the print time from the G-code. A change to the plate or to the
+settings slices it again. The plate, its settings, the printer and its bed
+may change while the plate is sliced. When any of them did, the printer
+started another print, or a part no longer fits, nothing is sent and the plate
+says so. The same check runs again right before the print starts. Nothing is sent after the
+page is closed. A printer that is printing, or that still holds a
+finished print, shows **Add to queue** instead. That button is off for now:
+the queue belongs to the Print queue module, and this module has no approved
+call to it. The menu beside the button slices without printing, downloads
+the G-code, or saves the placed STL. A saved STL keeps its position when it
+is opened again.
+
+Slicing uses the selected profile. 3MF project settings, colours, material
+assignments, support and seam painting, and plate definitions are dropped.
+The plate skips modifiers, negative volumes, support tools and other
+non-model geometry. Apply cuts made with negative volumes before exporting.
+Export one plate at a time if the project has several plates. If the page
+cannot read the part roles, including those in PrusaSlicer 3 projects,
+export the solid model as STL or geometry-only 3MF.
+
+A plate holds files up to 20 MiB each and 300,000 triangles in all, copies
+included. A 3MF archive can expand to 64 MiB.
 
 A slicer uses a lot of memory, so the module asks the host for 2560 MiB
 (`needs.memory_mib` in `module.yaml`). The operator overrides that figure per instance as `memory_mib` on the resource spec (ADR-20261027-5m4).

@@ -1,22 +1,25 @@
 <!--
-  The Slicing page: the PrusaSlicer versions on one tab and the jobs on the
-  other, each a listing like the app's others, and a detail for one version or
-  one job. What is on screen is kept in the address, so a link, a reload and
-  the back button land where the person was. It draws what a SlicerView holds,
-  so a story hands it a view in place of the server.
+  The Slicing page. It opens on the build-plate workspace. The PrusaSlicer
+  versions, the jobs and the API reference are pages of their own, reached
+  from the workspace's ⋯ menu, each a listing like the app's others with a
+  detail for one version or one job. What is on screen is kept in the
+  address, so a link, a reload and the back button land where the person was.
+  It draws what a SlicerView holds, so a story hands it a view in place of the
+  server.
 -->
 <script lang="ts">
+  import { ArrowLeft } from '@lucide/svelte';
+  import type { Device } from '@prusa/connect-ui/domain';
   import {
-    DetailTabs,
+    Button,
     FaultAlert,
     ListingSkeleton,
     type ListingStore,
     PageHeader,
   } from '@prusa/connect-ui/primitives';
 
-  import type { Job, SubmitBody, Translate } from '../../api';
+  import type { SubmitBody, Translate } from '../../api';
   import { PageAddress } from '../../page-address.svelte';
-  import type { Tab } from '../../page-state';
   import { ReleaseActs } from '../../release-acts.svelte';
   import { releaseRowsOf } from '../../releases';
   import type { SlicerView } from '../../store.svelte';
@@ -40,6 +43,7 @@
     tokensHref = '/settings/tokens',
     referenceHref = '/docs?module=com.github.aux.prusa3d.server-slicing',
     prepare,
+    devices = [],
   }: {
     view: SlicerView;
     t: Translate;
@@ -56,6 +60,8 @@
     /** The core's reference page showing this module's document. */
     referenceHref?: string;
     prepare?: PrepareApi;
+    /** The printers the person may see, for the workspace's printer picker. */
+    devices?: readonly Device[];
   } = $props();
 
   // A plain function declared below is hoisted, so the default above may name it.
@@ -68,14 +74,6 @@
       },
     };
   }
-
-  const acceptedJobAge = 10_000;
-  let accepted = $state.raw<{ job: Job; until: number }>();
-
-  const openPreparedJob = (job: Job): void => {
-    accepted = { job, until: Date.now() + acceptedJobAge };
-    address.go({ tab: 'jobs', job: job.id, model: undefined });
-  };
 
   const acts = $derived(new ReleaseActs(view));
   const pageState = $derived(address.state);
@@ -94,26 +92,66 @@
         ),
   );
 
-  const openJob = $derived.by(() => {
-    const id = pageState.job;
-    if (!id) return undefined;
-    const listed = view.jobs?.jobs.find((job) => job.id === id);
-    if (listed) return listed;
-    if (accepted?.job.id === id && Date.now() < accepted.until)
-      return accepted.job;
-    return undefined;
-  });
+  const openJob = $derived(
+    pageState.job === undefined
+      ? undefined
+      : view.jobs?.jobs.find((job) => job.id === pageState.job),
+  );
+
+  const workspace = $derived(
+    prepare !== undefined &&
+      pageState.tab === 'prepare' &&
+      pageState.release === undefined &&
+      pageState.job === undefined,
+  );
+
+  const links = $derived([
+    { href: address.href({ tab: 'slicers' }), label: t('slicer.tab.slicers') },
+    {
+      href: address.href({ tab: 'jobs' }),
+      label:
+        active > 0
+          ? t('slicer.plate.jobsRunning', { count: active })
+          : t('slicer.tab.jobs'),
+    },
+    { href: address.href({ tab: 'api' }), label: t('slicer.tab.api') },
+  ]);
+
+  const tabTitle = $derived(
+    t(
+      pageState.tab === 'prepare'
+        ? 'slicer.tab.slicers'
+        : `slicer.tab.${pageState.tab}`,
+    ),
+  );
 </script>
 
 <!-- A plain click on a link to another state of this page is taken here. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div
-  class="@container grid min-w-0 grid-cols-1 content-start gap-4 p-4"
+  class={[
+    '@container grid min-w-0 grid-cols-1 content-start',
+    // The workspace runs to the edges of the app's content area, so it takes
+    // back the padding the app shell's main element gives every page.
+    workspace ? '-mx-4 -my-6 @xl/app-shell:-mx-6' : 'gap-4 p-4',
+  ]}
   data-part="slicer-page"
   onclick={address.take}
 >
-  {#if pageState.release === undefined && pageState.job === undefined}
-    <PageHeader title={t('slicer.title')} />
+  {#if !workspace && pageState.release === undefined && pageState.job === undefined}
+    <PageHeader title={prepare ? tabTitle : t('slicer.title')}>
+      {#snippet actions()}
+        {#if prepare}
+          <Button variant="secondary" size="md">
+            {#snippet child({ props })}
+              <a {...props} href={address.href({ tab: 'prepare' })}
+                ><ArrowLeft aria-hidden="true" />{t('slicer.plate.back')}</a
+              >
+            {/snippet}
+          </Button>
+        {/if}
+      {/snippet}
+    </PageHeader>
   {/if}
   {#if view.load === 'loading'}
     <ListingSkeleton label={t('slicer.loading')} rows={6} />
@@ -125,7 +163,7 @@
         detail: view.fault?.detail,
       }}
     />
-  {:else if view.load === 'failed' && (pageState.tab !== 'prepare' || !view.slicers || !view.jobs)}
+  {:else if view.load === 'failed' && (!workspace || !view.slicers || !view.jobs)}
     <FaultAlert fault={view.fault} />
   {:else if view.slicers && view.jobs}
     {@const slicers = view.slicers}
@@ -133,47 +171,23 @@
     {#if view.load === 'failed'}
       <FaultAlert fault={view.fault} />
     {/if}
-    {#snippet slicersPanel()}
-      <ReleaseListing
-        {slicers}
-        administrator={jobs.all}
-        {address}
-        {acts}
-        {store}
-        {t}
-        onCheck={() => void view.checkReleases()}
-        onInstallUpdate={(version: string) => void view.install(version, false)}
-      />
-    {/snippet}
-    {#snippet jobsPanel()}
-      <JobListing
-        {jobs}
-        {address}
-        {store}
-        {t}
-        onCancel={(id: string) => void view.cancel(id)}
-      />
-    {/snippet}
-    {#snippet apiPanel()}
-      <ApiReference {apiBase} {coreBase} {tokensHref} {referenceHref} {t} />
-    {/snippet}
-    {#snippet preparePanel()}
-      {#if prepare}
-        {#key pageState.model}
-          <PreparePanel
-            beds={slicers.prepare_beds}
-            hasSlicer={slicers.installed.some((one) =>
-              one.version.startsWith('2.'),
-            )}
-            source={pageState.model}
-            api={prepare}
-            {t}
-            onSliced={openPreparedJob}
-          />
-        {/key}
-      {/if}
-    {/snippet}
-    {#if pageState.release !== undefined}
+    {#if workspace && prepare}
+      {#key pageState.model}
+        <PreparePanel
+          beds={slicers.prepare_beds}
+          profileSettings={slicers.prepare_settings}
+          hasSlicer={slicers.installed.some((one) =>
+            one.version.startsWith('2.'),
+          )}
+          source={pageState.model}
+          api={prepare}
+          {devices}
+          remember={store}
+          {links}
+          {t}
+        />
+      {/key}
+    {:else if pageState.release !== undefined}
       <FaultAlert fault={view.actionFault} />
       <ReleaseDetail
         version={pageState.release}
@@ -195,33 +209,29 @@
       />
     {:else}
       <FaultAlert fault={view.actionFault} />
-      <DetailTabs
-        tabs={[
-          {
-            id: 'slicers',
-            label: t('slicer.tab.slicers'),
-            panel: slicersPanel,
-          },
-          ...(prepare
-            ? [
-                {
-                  id: 'prepare',
-                  label: t('slicer.tab.prepare'),
-                  panel: preparePanel,
-                },
-              ]
-            : []),
-          {
-            id: 'jobs',
-            label: t('slicer.tab.jobs'),
-            count: active > 0 ? active : undefined,
-            panel: jobsPanel,
-          },
-          { id: 'api', label: t('slicer.tab.api'), panel: apiPanel },
-        ]}
-        active={pageState.tab}
-        onChange={(next: string) => address.go({ tab: next as Tab })}
-      />
+      {#if pageState.tab === 'jobs'}
+        <JobListing
+          {jobs}
+          {address}
+          {store}
+          {t}
+          onCancel={(id: string) => void view.cancel(id)}
+        />
+      {:else if pageState.tab === 'api'}
+        <ApiReference {apiBase} {coreBase} {tokensHref} {referenceHref} {t} />
+      {:else}
+        <ReleaseListing
+          {slicers}
+          administrator={jobs.all}
+          {address}
+          {acts}
+          {store}
+          {t}
+          onCheck={() => void view.checkReleases()}
+          onInstallUpdate={(version: string) =>
+            void view.install(version, false)}
+        />
+      {/if}
     {/if}
   {/if}
 </div>

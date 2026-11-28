@@ -10,6 +10,7 @@
   import type { SlicerApi } from '../../api';
   import { holdSession } from '../../session';
   import { everybodysJobs, someSlicers, t } from '../../test/fakes';
+  import { charlie, henry } from '../prepare-panel/prepare-fixtures';
   import SlicerRoute from './slicer-route.svelte';
 
   const api: SlicerApi = {
@@ -21,9 +22,11 @@
     pinSlicer: () => Promise.resolve(someSlicers),
     cancelJob: () => Promise.reject(new Error('the story cancels nothing')),
     submitJob: () => Promise.reject(new Error('the story slices nothing')),
+    readJob: () => Promise.reject(new Error('the story slices nothing')),
   };
 
-  // The route reads t, signal, store and pageHref of the host and nothing else.
+  // The route reads t, signal, store, fleet, client and pageHref of the host
+  // and nothing else. The client is never called before a person acts.
   const held: Record<string, string> = {};
   holdSession({
     host: {
@@ -37,6 +40,7 @@
           held[key] = value;
         },
       },
+      fleet: { devices: [henry, charlie], loading: false, loaded: true },
     } as unknown as ModuleHost,
     api,
   });

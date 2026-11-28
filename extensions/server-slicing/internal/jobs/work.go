@@ -216,6 +216,10 @@ func (m *Manager) prepare(ctx context.Context, job Job, input, dir string) (proj
 			return project.Prepared{}, "", fail(CodeNotAProject, "the selected STL profile is unavailable")
 		}
 
+		if job.Settings != nil {
+			settings = job.Settings.Apply(settings)
+		}
+
 		config := filepath.Join(dir, "profile.ini")
 		if err := os.WriteFile(config, []byte(settings), 0o600); err != nil {
 			return project.Prepared{}, "", fmt.Errorf("write the STL profile: %w", err)

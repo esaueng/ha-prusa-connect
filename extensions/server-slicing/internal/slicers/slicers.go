@@ -411,11 +411,14 @@ func (i Installed) MarshalJSON() ([]byte, error) {
 type View struct {
 	STLProfiles []string                   `json:"stl_profiles,omitempty"`
 	PrepareBeds map[string]settings.STLBed `json:"prepare_beds,omitempty"`
-	Platform    string                     `json:"platform"`
-	Installed   []Installed                `json:"installed"`
-	Available   []Offer                    `json:"available"`
-	Installing  []install.Progress         `json:"installing"`
-	Pinned      string                     `json:"pinned,omitempty"`
+	// PrepareSettings is what each saved profile prints with before a
+	// person changes anything.
+	PrepareSettings map[string]settings.ProfileSettings `json:"prepare_settings,omitempty"`
+	Platform        string                              `json:"platform"`
+	Installed       []Installed                         `json:"installed"`
+	Available       []Offer                             `json:"available"`
+	Installing      []install.Progress                  `json:"installing"`
+	Pinned          string                              `json:"pinned,omitempty"`
 	// Default is the version a job that names none gets, and empty when
 	// nothing is installed.
 	Default string `json:"default,omitempty"`

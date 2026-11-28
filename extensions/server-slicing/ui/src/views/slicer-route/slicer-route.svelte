@@ -52,6 +52,7 @@
   {apiBase}
   {coreBase}
   {prepare}
+  devices={host.fleet.devices}
   tokensHref="/settings/tokens"
   referenceHref={`/docs?module=${encodeURIComponent(namespace)}`}
 />

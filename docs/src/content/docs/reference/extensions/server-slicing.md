@@ -13,13 +13,18 @@ Server slicing turns a 3MF project or an STL model into G-code with PrusaSlicer.
 Choose **Slice** on a compatible file in **Storage**. A 3MF project carries its
 settings. With an STL, choose a saved PrusaSlicer 2.x profile for the printer
 and material.
-Follow the job on **Slicing → Jobs** and find its G-code in Storage.
+Follow the job under **Jobs** in the ⋯ menu of the **Slicing** page, and find
+its G-code in Storage.
+
+The **Slicing** page opens on the build plate of a printer. Add STL and 3MF
+files, place, lay flat and arrange them, choose the print settings, and
+press **Print** to slice the plate and start it on an idle printer.
 
 An administrator adds profiles in the Server slicing extension settings.
 Use **File → Export → Export Config** in PrusaSlicer and save the text under
 a name in `stl_profiles`.
 
-Before the first job, an administrator installs a PrusaSlicer version on the Slicing page. The extension offers the releases GitHub publishes, checks each download against its SHA-256 and keeps several versions side by side. A release that publishes no SHA-256 installs only when the administrator confirms it.
+Before the first job, an administrator installs a PrusaSlicer version on the Slicing page, under Slicers in the menu of its build plate. The extension offers the releases GitHub publishes, checks each download against its SHA-256 and keeps several versions side by side. A release that publishes no SHA-256 installs only when the administrator confirms it.
 
 The Linux builds on GitHub that the extension can install end at PrusaSlicer 2.8.1, and at 2.7.4 on arm64. For a newer version on Linux, and in the container image, which carries no PrusaSlicer, name a manifest of builds you host in `manifest_url`. Or install PrusaSlicer on the machine and name its executable in `local_binaries`.
 
@@ -37,7 +42,7 @@ Slices 3MF projects and STL models into G-code on this server with the PrusaSlic
 
 | | |
 |---|---|
-| version | 0.5.0 |
+| version | 0.6.0 |
 | licence | OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1 |
 | module path | `github.com/prusa3d/server-slicing` |
 | namespace | `com.github.aux.prusa3d.server-slicing` |

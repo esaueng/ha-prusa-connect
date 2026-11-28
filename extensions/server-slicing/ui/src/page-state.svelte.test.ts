@@ -141,6 +141,18 @@ describe('the page state in the address', () => {
     expect(stateOf('')).toEqual(DEFAULT_STATE);
   });
 
+  it('opens on the build plate, and names the versions in the address', () => {
+    expect(stateOf('').tab).toBe('prepare');
+    expect(stateOf('?tab=prepare&model=local:a.stl')).toMatchObject({
+      tab: 'prepare',
+      model: 'local:a.stl',
+    });
+    expect(searchOf({ ...DEFAULT_STATE, tab: 'slicers' })).toBe('?tab=slicers');
+    expect(searchOf({ ...DEFAULT_STATE, model: 'local:a.stl' })).toBe(
+      '?model=local%3Aa.stl',
+    );
+  });
+
   it('reads back what it wrote', () => {
     const state = {
       ...DEFAULT_STATE,
@@ -175,7 +187,7 @@ describe('the page state in the address', () => {
   it('reads an unknown tab or sort as its default', () => {
     const state = stateOf('?tab=nope&sort=size.asc&jsort=created.sideways');
 
-    expect(state.tab).toBe('slicers');
+    expect(state.tab).toBe('prepare');
     expect(state.releaseSort).toEqual(DEFAULT_STATE.releaseSort);
     expect(state.jobSort).toEqual({ column: 'created', ascending: false });
   });
