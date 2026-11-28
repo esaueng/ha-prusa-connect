@@ -651,6 +651,55 @@ describe('what the re-check of the notes found', () => {
 });
 
 describe('what the re-check of the queue rebase found', () => {
+  it('adds nothing to the queue when a file is still read as the slice ends', async () => {
+    let finish: (job: Job) => void = () => undefined;
+    const submit = vi.fn(
+      () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const job = vi.fn(() => Promise.resolve(slicedJob));
+    const enqueue = vi.fn(testPrepare.enqueue);
+    const print = vi.fn(testPrepare.print);
+    const remember = memory();
+    remember.write('plate.printer', charlie.id);
+    const answers = holdWorkerAnswers();
+    try {
+      await page.viewport(1440, 900);
+      await render(PreparePanel, {
+        props: {
+          ...workspace(
+            { submit, job, enqueue, print },
+            'local:parts/bracket.stl',
+          ),
+          remember,
+        },
+      });
+      await expect.element(status()).toMatchTextContent('1 part');
+      const queue = page.getByRole('button', { name: /Add to queue/u });
+      await queue.click();
+      await expect.poll(() => submit.mock.calls.length).toBe(1);
+
+      drop(await loadFixture('block-and-peg-inch.step'));
+      await expect.element(page.getByText('Reading the model…')).toBeVisible();
+      finish(slicedJob);
+      await expect
+        .element(page.getByText(/The plate changed while it was sliced/u))
+        .toBeVisible();
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(print).not.toHaveBeenCalled();
+      await expect.element(queue).toBeDisabled();
+
+      answers.release();
+      await expect.element(status()).toMatchTextContent('2 parts');
+      await expect.element(queue).toBeEnabled();
+      expect(enqueue).not.toHaveBeenCalled();
+    } finally {
+      answers.restore();
+    }
+  });
+
   it('lets a click on the text of a note reach the plate, and Dismiss take its own', async () => {
     await page.viewport(1440, 900);
     await render(PreparePanel, { props: workspace() });
