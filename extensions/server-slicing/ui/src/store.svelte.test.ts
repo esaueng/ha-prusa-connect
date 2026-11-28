@@ -14,6 +14,7 @@ const apiWith = (overrides: Partial<SlicerApi> = {}): SlicerApi => ({
   pinSlicer: vi.fn(() => Promise.resolve(someSlicers)),
   cancelJob: vi.fn(() => Promise.resolve(everybodysJobs.jobs[0]!)),
   submitJob: vi.fn(() => Promise.resolve(everybodysJobs.jobs[0]!)),
+  readJob: vi.fn(() => Promise.resolve(everybodysJobs.jobs[0]!)),
   ...overrides,
 });
 

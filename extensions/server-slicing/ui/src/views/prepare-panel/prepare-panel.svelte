@@ -1,260 +1,404 @@
+<!--
+  The build-plate workspace the Slicing page opens on: one row of tools over a
+  3D view of the chosen printer's bed, and a status line under it. Parts are
+  added from files or from Storage, placed, laid flat and arranged, then
+  sliced on this server and sent to the printer.
+-->
 <script lang="ts">
-  import { Box, Crosshair, FileUp, RotateCcw } from '@lucide/svelte';
+  import { FileUp } from '@lucide/svelte';
   import {
-    Button,
-    FaultAlert,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-  } from '@prusa/connect-ui/primitives';
-  import { describeFault, type FaultText } from '@prusa/connect-ui/i18n';
+    describeFault,
+    type FaultText,
+    type MessageParams,
+  } from '@prusa/connect-ui/i18n';
+  import { FaultAlert, Input } from '@prusa/connect-ui/primitives';
+  import type { Device } from '@prusa/connect-ui/domain';
   import { parseFileRef } from '@prusa/connect-ui/slots';
-  import { onMount } from 'svelte';
-  import type { BufferGeometry, Matrix4 } from 'three';
+  import { onMount, untrack } from 'svelte';
 
-  import type { Job, STLBed, Translate } from '../../api';
-  import { ModelLimitError } from './import-limits';
+  import type { STLBed, Translate } from '../../api';
+  import { footprintOf, worldMatrix } from '../../plate/part';
   import {
-    bedCenter,
-    fits,
-    makeSTL,
-    orientedModel,
-    placedMatrix,
-    readModel,
-    upright,
-    type Orientation,
-  } from './model';
-  import { placedName, type Destination, type PrepareApi } from './prepare-api';
-  import { plateScene, type PlateScene } from './scene';
+    meshKey,
+    PlateFlow,
+    signatureOf,
+  } from '../../plate/plate-flow.svelte';
+  import { plateScene, type PlateScene } from '../../plate/plate-scene';
+  import { Plate } from '../../plate/plate.svelte';
+  import {
+    checkedSettings,
+    choicesKey,
+    type PlateChoices,
+    PRINTER_KEY,
+    type ProfileSettings,
+    readChoices,
+    unchanged,
+    writeChoices,
+  } from '../../plate/print-settings';
+  import {
+    decidePrint,
+    plateBlockOf,
+    printerChoicesOf,
+  } from '../../plate/printers';
+  import { PlateStatus } from '../plate-status';
+  import { PlateToolbar, type ToolbarLink } from '../plate-toolbar';
+  import { PrintButton } from '../print-button';
+  import { PrintSettingsMenu } from '../print-settings';
+  import { PrinterPicker } from '../printer-picker';
+  import { ModelLimitError } from './import-limits';
+  import { readMeshFile } from './mesh-import';
+  import type { Destination, PrepareApi } from './prepare-api';
   import { ThreeMFRoleError } from './three-mf-roles';
+
+  /** What a page remembers for this person between visits. */
+  interface Remember {
+    read(key: string): string | null;
+    write(key: string, value: string): void;
+  }
 
   let {
     beds = {},
+    profileSettings = {},
     hasSlicer,
     source,
     api,
+    devices,
+    remember,
+    links = [],
+    queue = false,
     t,
-    onSliced,
   }: {
-    beds?: Record<string, STLBed> | undefined;
+    /** The rectangular print volume of each saved profile, by name. */
+    beds?: Readonly<Record<string, STLBed>> | undefined;
+    /** What each saved profile prints with, by name. */
+    profileSettings?: Readonly<Record<string, ProfileSettings>> | undefined;
     hasSlicer: boolean;
+    /** A model in Storage to open, as `<storage>:<path>`. */
     source?: string | undefined;
     api: PrepareApi;
+    /** The printers the person may see, as the host's fleet lists them. */
+    devices: readonly Device[];
+    remember: Remember;
+    links?: readonly ToolbarLink[];
+    /** Whether this page can add a plate to a printer's print queue. */
+    queue?: boolean;
     t: Translate;
-    onSliced: (job: Job) => void;
   } = $props();
+
+  // The file types the readers in mesh-import.ts take.
+  const ACCEPT = '.stl,.3mf';
 
   const id = $props.id();
   const controller = new AbortController();
-  let preview = $state.raw<PlateScene>();
+  // The API and the store a workspace is mounted with stay its own.
+  const flow = new PlateFlow(
+    untrack(() => api),
+    controller.signal,
+  );
+  let root = $state<HTMLElement>();
+  let scene = $state.raw<PlateScene>();
   let webglFailed = $state(false);
-  let destinations = $state.raw<Destination[]>([]);
-  let destinationsLoading = $state(true);
-  let destinationFault = $state<FaultText>();
-  let storageChoice = $state('');
-  let profileChoice = $state('');
-  let mesh = $state.raw<BufferGeometry>();
-  let fileName = $state('');
-  let orientation = $state<Orientation>({ ...upright });
-  let position = $state<[number, number]>();
-  let floor = $state(0);
-  let modelFault = $state('');
-  let actionFault = $state<FaultText>();
+  let top = $state(false);
   let loading = $state(false);
-  let busy = $state(false);
-  let savedPath = $state('');
+  let modelFault = $state('');
+  let notice = $state<{ key: string; params: MessageParams }>();
+  let destinations = $state.raw<Destination[]>([]);
+  let destinationFault = $state<FaultText>();
+  let printerChoice = $state(
+    untrack(() => remember.read(PRINTER_KEY)) ?? undefined,
+  );
+  let choicesFor = $state.raw<Readonly<Record<string, PlateChoices>>>({});
   let loadingVersion = 0;
-  let draft:
-    | {
-        mesh: BufferGeometry;
-        matrix: Matrix4;
-        storage: string;
-        name: string;
-        saved: string;
-      }
-    | undefined;
 
+  const printers = $derived(printerChoicesOf(devices));
+  const printer = $derived(
+    printers.find((one) => one.id === printerChoice) ?? printers[0],
+  );
+  const choices = $derived(
+    choicesFor[printer?.id ?? ''] ??
+      readChoices(remember.read(choicesKey(printer?.id))),
+  );
   const profileNames = $derived(Object.keys(beds).sort());
-  const profile = $derived(
-    profileNames.includes(profileChoice)
-      ? profileChoice
-      : (profileNames[0] ?? ''),
+  const sameSize = (a: STLBed, b: STLBed): boolean =>
+    Math.abs(a.max_x - a.min_x - (b.max_x - b.min_x)) < 1 &&
+    Math.abs(a.max_y - a.min_y - (b.max_y - b.min_y)) < 1;
+  // A profile kept for this printer, else one whose bed is the printer's size.
+  const profile = $derived.by(() => {
+    if (choices.profile && profileNames.includes(choices.profile))
+      return choices.profile;
+    const printerBed = printer?.bed;
+    const fitting = printerBed
+      ? profileNames.find((name) => {
+          const bed = beds[name];
+          return bed !== undefined && sameSize(bed, printerBed);
+        })
+      : undefined;
+    return fitting ?? profileNames[0];
+  });
+  const profileBed = $derived(profile ? beds[profile] : undefined);
+  // The volume the parts must stand in: the printer's, placed where the
+  // profile's bed starts, and no larger than the profile's bed, which is what
+  // the slicer checks against.
+  const bed = $derived.by((): STLBed | undefined => {
+    const own = printer?.bed;
+    if (!own) return profileBed;
+    const minX = profileBed?.min_x ?? 0;
+    const minY = profileBed?.min_y ?? 0;
+    return {
+      min_x: minX,
+      min_y: minY,
+      max_x: Math.min(minX + own.max_x, profileBed?.max_x ?? Infinity),
+      max_y: Math.min(minY + own.max_y, profileBed?.max_y ?? Infinity),
+      height: Math.min(own.height, profileBed?.height ?? Infinity),
+    };
+  });
+  const bedNote = $derived(
+    printer?.bed && profileBed && !sameSize(profileBed, printer.bed)
+      ? t('slicer.plate.bedDiffers', {
+          width: String(profileBed.max_x - profileBed.min_x),
+          depth: String(profileBed.max_y - profileBed.min_y),
+        })
+      : undefined,
   );
-  const bed = $derived(beds[profile]);
-  const storage = $derived(storageChoice || (destinations[0]?.name ?? ''));
-  const storageLabel = $derived(
-    destinations.find((one) => one.name === storage)?.label,
+  const plate = new Plate(() => bed);
+  const storage = $derived(
+    destinations.find((one) => one.name === choices.storage)?.name ??
+      destinations[0]?.name ??
+      '',
   );
-  const xy: [number, number] = $derived(
-    position ?? (bed ? bedCenter(bed) : [0, 0]),
+  const settings = $derived(
+    unchanged(choices.settings) ? undefined : checkedSettings(choices.settings),
   );
-  const oriented = $derived(mesh && orientedModel(mesh, orientation, floor));
-  const placement = $derived(oriented && placedMatrix(oriented.matrix, xy));
-  const onBed = $derived(
-    Boolean(bed && oriented && fits(oriented.bounds, xy, bed)),
+  const meshes = $derived(
+    plate.parts.map((part) => ({
+      id: part.id,
+      geometry: part.geometry,
+      matrix: worldMatrix(part),
+    })),
   );
-  const canSlice = $derived(
-    hasSlicer &&
-      onBed &&
-      storage !== '' &&
-      !busy &&
-      !loading &&
-      modelFault === '',
+  const key = $derived(meshKey(meshes));
+  const sliced = $derived(
+    flow.slicedFor(
+      signatureOf({ meshKey: key, profile: profile ?? '', settings, storage }),
+    ),
+  );
+  const readiness = $derived({
+    parts: plate.parts.length,
+    outside: plate.outside.length,
+    profile: profile !== undefined,
+    slicer: hasSlicer,
+    storage: storage !== '',
+    busy: flow.busy || loading,
+  });
+  const decision = $derived(decidePrint(printer, readiness, queue));
+  const canSlice = $derived(plateBlockOf(readiness) === undefined);
+  const selectedName = $derived(
+    plate.selection.length === 1 ? plate.selection[0]?.name : undefined,
   );
 
-  const angles = [
-    { key: 'rx', label: 'slicer.prepare.rotateX' },
-    { key: 'ry', label: 'slicer.prepare.rotateY' },
-    { key: 'rz', label: 'slicer.prepare.rotateZ' },
-  ] as const;
+  const input = () => ({
+    meshKey: key,
+    name: plate.parts[0]?.name ?? 'plate.stl',
+    meshes,
+    storage,
+    profile: profile ?? '',
+    settings,
+  });
+
+  const choose = (next: string): void => {
+    printerChoice = next;
+    remember.write(PRINTER_KEY, next);
+  };
+
+  const keep = (next: PlateChoices): void => {
+    const owner = printer?.id ?? '';
+    choicesFor = { ...choicesFor, [owner]: next };
+    remember.write(choicesKey(printer?.id), writeChoices(next));
+  };
 
   const load = async (file: Promise<File> | File): Promise<void> => {
     const version = ++loadingVersion;
     loading = true;
     modelFault = '';
-    actionFault = undefined;
     let reading = true;
     try {
       const loaded = await file;
       reading = false;
-      const model = await readModel(loaded);
-      const { geometry, placedAt } = model;
+      const imported = await readMeshFile(loaded);
       if (controller.signal.aborted || loadingVersion !== version) {
-        geometry.dispose();
+        for (const part of imported.parts) part.geometry.dispose();
         return;
       }
-      mesh?.dispose();
-      mesh = geometry;
-      fileName = loaded.name;
-      draft = undefined;
-      savedPath = '';
-      reset();
-      position = placedAt;
-      floor = model.floor;
+      const refused = plate.add(imported, loaded.name);
+      if (refused)
+        notice = { key: 'slicer.plate.notice.tooManyTriangles', params: {} };
+      else if (loaded.name.toLowerCase().endsWith('.3mf'))
+        notice = { key: 'slicer.prepare.geometryOnly', params: {} };
     } catch (error) {
-      if (!controller.signal.aborted && loadingVersion === version) {
-        let key = reading
-          ? 'slicer.prepare.storageReadFailed'
-          : 'slicer.prepare.badModel';
-        if (error instanceof ModelLimitError) key = 'slicer.prepare.modelLimit';
-        if (error instanceof ThreeMFRoleError) key = 'slicer.prepare.partRoles';
-        modelFault = t(key);
-      }
+      if (!controller.signal.aborted && loadingVersion === version)
+        modelFault = t(faultKey(error, reading));
     } finally {
       if (loadingVersion === version) loading = false;
     }
   };
 
-  const reset = (): void => {
-    position = undefined;
-    floor = 0;
-    orientation = { ...upright };
+  const faultKey = (error: unknown, reading: boolean): string => {
+    if (error instanceof ModelLimitError) return 'slicer.prepare.modelLimit';
+    if (error instanceof ThreeMFRoleError) return 'slicer.prepare.partRoles';
+    return reading
+      ? 'slicer.prepare.storageReadFailed'
+      : 'slicer.prepare.badModel';
   };
-
-  const dropped = (event: DragEvent): void => {
-    event.preventDefault();
-    const file = event.dataTransfer?.files[0];
-    if (file && !busy) void load(file);
-  };
-
-  const pick = (event: Event): void => {
-    if (!(event.currentTarget instanceof HTMLInputElement)) return;
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = '';
-    if (file && !busy) void load(file);
-  };
-
-  const changeNumber =
-    (current: number, changed: (value: number) => void) =>
-    (event: Event): void => {
-      if (!(event.currentTarget instanceof HTMLInputElement)) return;
-      const input = event.currentTarget;
-      if (Number.isFinite(input.valueAsNumber) && input.validity.valid)
-        changed(input.valueAsNumber);
-      else input.value = String(current);
-    };
 
   const browse = (): void => {
     document.getElementById(`${id}-model`)?.click();
   };
 
-  const chooseProfile = (value: string): void => {
-    profileChoice = value;
-    position = undefined;
+  const pick = (event: Event): void => {
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const files = [...(event.currentTarget.files ?? [])];
+    event.currentTarget.value = '';
+    for (const file of files) void load(file);
   };
 
-  const chooseStorage = (value: string): void => {
-    storageChoice = value;
+  const dropped = (event: DragEvent): void => {
+    event.preventDefault();
+    for (const file of event.dataTransfer?.files ?? []) void load(file);
   };
 
-  const attachPreview = (
-    canvas: HTMLCanvasElement,
-  ): (() => void) | undefined => {
+  const arrangeParts = (scope: 'all' | 'selection'): void => {
+    const count = scope === 'all' ? plate.parts.length : plate.selected.length;
+    const unplaced = plate.arrange(scope);
+    notice = unplaced
+      ? { key: 'slicer.plate.notice.unplaced', params: { count: unplaced } }
+      : { key: 'slicer.plate.notice.arranged', params: { count } };
+  };
+
+  const copy = (): void => {
+    const added = plate.copy();
+    notice = added
+      ? { key: 'slicer.plate.notice.copied', params: { count: added } }
+      : { key: 'slicer.plate.notice.tooManyTriangles', params: {} };
+  };
+
+  const print = async (): Promise<void> => {
+    notice = undefined;
+    if (decision.block !== undefined || !printer) return;
+    await flow.print(input(), { id: printer.id, name: printer.name });
+  };
+
+  const sliceOnly = async (): Promise<void> => {
+    notice = undefined;
+    if (canSlice) await flow.slice(input());
+  };
+
+  const saveStl = async (): Promise<void> => {
+    notice = undefined;
+    if (plate.parts.length > 0 && storage) await flow.save(input());
+  };
+
+  const download = async (): Promise<void> => {
+    notice = undefined;
+    if (!canSlice) return;
+    const file = await flow.download(input());
+    if (!file) return;
+    const href = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = file.name;
+    link.click();
+    URL.revokeObjectURL(href);
+  };
+
+  const attach = (canvas: HTMLCanvasElement): (() => void) | undefined => {
     try {
-      const scene = plateScene(canvas, (xy) => {
-        position = xy;
+      const made = plateScene(canvas, {
+        press: (part, additive) => {
+          plate.press(part, additive);
+        },
+        dragStart: () => {
+          plate.beginMove();
+        },
+        drag: (dx, dy) => {
+          plate.moveBy(dx, dy);
+        },
+        dragEnd: () => {
+          plate.endMove();
+        },
+        layFlat: (part, face) => {
+          plate.layFlat(part, face);
+        },
       });
-      preview = scene;
-      return () => scene.dispose();
+      scene = made;
+      return () => {
+        made.dispose();
+      };
     } catch {
       webglFailed = true;
       return undefined;
     }
   };
 
-  const submit = async (): Promise<void> => {
-    if (!canSlice || !mesh || !placement) return;
-    busy = true;
-    actionFault = undefined;
-    savedPath = '';
-    const selectedProfile = profile;
-    try {
-      if (
-        draft?.mesh !== mesh ||
-        !draft.matrix.equals(placement) ||
-        draft.storage !== storage
-      ) {
-        draft = {
-          mesh,
-          matrix: placement,
-          storage,
-          name: placedName(fileName),
-          saved: '',
-        };
-      }
-      const { signal } = controller;
-      if (!draft.saved)
-        draft.saved = await api.save(
-          draft.storage,
-          draft.name,
-          makeSTL(draft.mesh, draft.matrix),
-          signal,
-        );
-      savedPath = draft.saved;
-      const job = await api.submit(
-        draft.storage,
-        draft.saved,
-        selectedProfile,
-        signal,
-      );
-      if (!signal.aborted) onSliced(job);
-    } catch (error) {
-      if (!controller.signal.aborted) actionFault = describeFault(error);
-    } finally {
-      busy = false;
+  /** A key typed into a field, a menu or a dialog is not the plate's. */
+  const typing = (target: EventTarget | null): boolean =>
+    target instanceof Element &&
+    target.closest(
+      'input, textarea, select, [contenteditable], [role="menu"], [role="dialog"], [role="listbox"]',
+    ) !== null;
+
+  const keyed = (event: KeyboardEvent): void => {
+    if (event.defaultPrevented || typing(event.target)) return;
+    const onPage =
+      event.target === document.body ||
+      (event.target instanceof Node && root?.contains(event.target) === true);
+    if (!onPage) return;
+    const command = event.metaKey || event.ctrlKey;
+    if (command && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      plate.undo();
+    } else if (command || event.altKey) {
+      return;
+    } else if (event.key === 'r' || event.key === 'R') {
+      plate.rotate();
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      plate.remove();
+    } else if (event.key === 'Escape') {
+      if (plate.mode === 'layflat') plate.mode = 'move';
+      else plate.clearSelection();
     }
   };
 
   $effect(() => {
-    if (bed) preview?.bed(bed);
+    if (bed) scene?.bed(bed);
   });
 
   $effect(() => {
-    preview?.model(mesh, placement, onBed, Boolean(bed) && !busy, xy);
+    const outside = plate.outside;
+    const selected = plate.selected;
+    scene?.parts(
+      plate.parts.map((part) => ({
+        id: part.id,
+        geometry: part.geometry,
+        matrix: worldMatrix(part),
+        rect: footprintOf(part),
+        selected: selected.includes(part.id),
+        outside: outside.includes(part.id),
+      })),
+    );
+  });
+
+  $effect(() => {
+    scene?.mode(plate.mode);
+  });
+
+  $effect(() => {
+    // A listener on the window, because the keys reach the body when nothing
+    // on the page has focus. It ends with the workspace.
+    window.addEventListener('keydown', keyed);
+    return () => {
+      window.removeEventListener('keydown', keyed);
+    };
   });
 
   onMount(() => {
@@ -266,276 +410,185 @@
         if (signal.aborted) return;
         destinations = values;
         const candidate = from && parseFileRef(from)?.storage;
-        if (candidate && values.some((one) => one.name === candidate))
-          storageChoice = candidate;
+        if (
+          candidate &&
+          !choices.storage &&
+          values.some((one) => one.name === candidate)
+        )
+          keep({ ...choices, storage: candidate });
       })
       .catch((error: unknown) => {
         if (!signal.aborted) destinationFault = describeFault(error);
-      })
-      .finally(() => {
-        if (!signal.aborted) destinationsLoading = false;
       });
 
     if (from) void load(api.read(from, signal));
 
     return () => {
       controller.abort();
-      mesh?.dispose();
+      plate.dispose();
     };
   });
+
+  const noticeText = $derived.by(() => {
+    const shown = flow.notice ?? notice;
+    return shown ? t(shown.key, shown.params) : undefined;
+  });
+  const blocked = $derived(
+    decision.block && !(decision.block === 'busy' && flow.busy)
+      ? t(`slicer.plate.blocked.${decision.block}`)
+      : undefined,
+  );
 </script>
 
-<div class="@container grid gap-4" data-part="prepare-panel">
-  <FaultAlert fault={destinationFault} />
-  <FaultAlert fault={actionFault} />
-  {#if actionFault && savedPath}
-    <p class="text-sm break-all text-muted-foreground">
-      {t('slicer.prepare.saved', { path: savedPath })}
-    </p>
-  {/if}
-
-  <div class="workspace-grid grid min-w-0 gap-4">
-    <section
-      class="plate-shell grid min-w-0 overflow-hidden rounded-md border border-border bg-card"
-      aria-label={t('slicer.prepare.plate')}
-    >
-      <header
-        class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2"
-      >
-        <h2 class="font-medium">{t('slicer.prepare.plate')}</h2>
-        <div class="flex flex-wrap items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            label={t('slicer.prepare.perspective')}
-            disabled={!bed || webglFailed}
-            onclick={() => preview?.view()}><Box /></Button
-          >
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            label={t('slicer.prepare.top')}
-            disabled={!bed || webglFailed}
-            onclick={() => preview?.view(true)}><Crosshair /></Button
-          >
-          <Button variant="secondary" disabled={busy} onclick={browse}
-            ><FileUp />{t('slicer.prepare.open')}</Button
-          >
-        </div>
-      </header>
-
-      <Input
-        id="{id}-model"
-        type="file"
-        accept=".stl,.3mf"
-        class="hidden"
-        onchange={pick}
+<div
+  bind:this={root}
+  class="workspace @container/plate grid min-w-0 bg-background"
+  data-part="prepare-panel"
+>
+  <PlateToolbar
+    {plate}
+    {top}
+    adding={loading}
+    {links}
+    {t}
+    onAdd={browse}
+    onView={(next: boolean) => {
+      top = next;
+      scene?.view(next);
+    }}
+    onArrange={arrangeParts}
+    onCopy={copy}
+  >
+    {#snippet trailing()}
+      <PrinterPicker {printers} chosen={printer?.id} {t} onChoose={choose} />
+      <PrintSettingsMenu
+        {choices}
+        profiles={Object.fromEntries(
+          profileNames.map((name) => [name, profileSettings[name] ?? {}]),
+        )}
+        {destinations}
+        printerName={printer?.name}
+        {bedNote}
+        {t}
+        onChange={keep}
       />
+      <PrintButton
+        {decision}
+        estimate={sliced?.result?.estimated_seconds}
+        step={flow.step}
+        {canSlice}
+        canSave={plate.parts.length > 0 && storage !== '' && !flow.busy}
+        describedBy="{id}-blocked"
+        {t}
+        onPrint={() => void print()}
+        onSliceOnly={() => void sliceOnly()}
+        onDownload={() => void download()}
+        onSaveStl={() => void saveStl()}
+      />
+    {/snippet}
+  </PlateToolbar>
 
-      <div
-        class="plate-stage relative grid min-h-96 min-w-0 place-items-center overflow-hidden bg-muted/50"
-        role="region"
-        aria-label={t('slicer.prepare.plate')}
-        ondragover={(event) => event.preventDefault()}
-        ondrop={dropped}
-      >
-        <canvas
-          class="absolute inset-0 size-full touch-none"
-          aria-label={t('slicer.prepare.view')}
-          {@attach attachPreview}
-        ></canvas>
-        {#if loading || !mesh || webglFailed}
-          <div
-            class="pointer-events-none z-10 m-4 grid max-w-68 place-items-center gap-2 rounded-md border border-border bg-card p-4 text-center text-sm"
-            aria-live="polite"
-          >
-            <FileUp class="size-5 text-muted-foreground" />
-            {#if loading}
-              {t('slicer.prepare.reading')}
-            {:else if webglFailed}
-              {t('slicer.prepare.noWebGL')}
-            {:else}
-              {t('slicer.prepare.drop')}
-            {/if}
-          </div>
-        {/if}
-        {#if bed}
-          <div
-            class="pointer-events-none absolute end-3 bottom-3 rounded-sm bg-card px-2 py-1 text-xs text-muted-foreground"
-          >
-            {t('slicer.prepare.bedSize', {
-              width: String(bed.max_x - bed.min_x),
-              depth: String(bed.max_y - bed.min_y),
-              height: String(bed.height),
-            })}
-          </div>
-        {/if}
+  <Input
+    id="{id}-model"
+    type="file"
+    accept={ACCEPT}
+    multiple
+    class="hidden"
+    onchange={pick}
+  />
+
+  <div
+    class="relative min-h-0 min-w-0 overflow-hidden bg-muted/50"
+    role="region"
+    aria-label={t('slicer.prepare.plate')}
+    ondragover={(event) => {
+      event.preventDefault();
+    }}
+    ondrop={dropped}
+  >
+    <canvas
+      class="absolute inset-0 size-full touch-none"
+      aria-label={t('slicer.prepare.view')}
+      data-mode={plate.mode}
+      {@attach attach}
+    ></canvas>
+
+    {#if loading || plate.parts.length === 0 || webglFailed}
+      <div class="pointer-events-none absolute inset-0 grid place-items-center">
+        <p
+          class="grid max-w-68 place-items-center gap-2 border border-border bg-card p-4 text-center text-sm"
+          aria-live="polite"
+        >
+          <FileUp class="size-5 text-muted-foreground" aria-hidden="true" />
+          {#if loading}
+            {t('slicer.prepare.reading')}
+          {:else if webglFailed}
+            {t('slicer.prepare.noWebGL')}
+          {:else}
+            {t('slicer.prepare.drop')}
+          {/if}
+        </p>
       </div>
+    {/if}
+
+    <div class="absolute inset-x-3 top-3 grid gap-2">
+      <FaultAlert fault={destinationFault} />
+      <FaultAlert fault={flow.fault} />
       {#if modelFault}
         <FaultAlert
           fault={{ code: undefined, title: modelFault, detail: undefined }}
         />
       {/if}
-    </section>
+    </div>
 
-    <aside
-      class="grid min-w-0 content-start gap-4 rounded-md border border-border bg-card p-4"
+    <div
+      class="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center"
+      role="status"
+      aria-live="polite"
     >
-      <div class="grid gap-2">
-        <Label for="{id}-profile">{t('slicer.prepare.profile')}</Label>
-        {#if profileNames.length > 0}
-          <Select value={profile} onValueChange={chooseProfile}>
-            <SelectTrigger id="{id}-profile" disabled={busy}>
-              <SelectValue>{profile}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {#each profileNames as name (name)}
-                <SelectItem value={name} label={name}>{name}</SelectItem>
-              {/each}
-            </SelectContent>
-          </Select>
-        {:else}
-          <p class="text-sm text-muted-foreground">
-            {t('slicer.prepare.noProfiles')}
-          </p>
-        {/if}
-        {#if !hasSlicer}
-          <p class="text-sm text-muted-foreground">
-            {t('slicer.prepare.noSlicer')}
-          </p>
-        {/if}
-      </div>
-
-      <fieldset
-        class="grid min-w-0 gap-3 border-t border-border pt-3"
-        disabled={!mesh || !bed || busy}
-      >
-        <legend class="sr-only">{t('slicer.prepare.placement')}</legend>
-        <div class="flex items-center justify-between gap-2">
-          <h2 class="font-medium">{t('slicer.prepare.placement')}</h2>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            label={t('slicer.prepare.reset')}
-            onclick={reset}><RotateCcw /></Button
-          >
-        </div>
-        {#if fileName}
-          <p class="truncate text-sm text-muted-foreground" title={fileName}>
-            {fileName}
-          </p>
-        {/if}
-        {#if fileName.toLowerCase().endsWith('.3mf')}
-          <p class="text-sm text-muted-foreground">
-            {t('slicer.prepare.geometryOnly')}
-          </p>
-        {/if}
-        <div class="grid grid-cols-2 gap-2">
-          <div class="grid gap-1">
-            <Label for="{id}-x">{t('slicer.prepare.x')}</Label>
-            <Input
-              id="{id}-x"
-              type="number"
-              step="any"
-              value={xy[0]}
-              onchange={changeNumber(xy[0], (value) => {
-                position = [value, xy[1]];
-              })}
-            />
-          </div>
-          <div class="grid gap-1">
-            <Label for="{id}-y">{t('slicer.prepare.y')}</Label>
-            <Input
-              id="{id}-y"
-              type="number"
-              step="any"
-              value={xy[1]}
-              onchange={changeNumber(xy[1], (value) => {
-                position = [xy[0], value];
-              })}
-            />
-          </div>
-          {#each angles as angle (angle.key)}
-            <div class="grid gap-1">
-              <Label for="{id}-{angle.key}">{t(angle.label)}</Label>
-              <Input
-                id="{id}-{angle.key}"
-                type="number"
-                min="-360"
-                max="360"
-                step="any"
-                value={orientation[angle.key]}
-                onchange={changeNumber(orientation[angle.key], (value) => {
-                  orientation[angle.key] = value;
-                })}
-              />
-            </div>
-          {/each}
-          <div class="grid gap-1">
-            <Label for="{id}-scale">{t('slicer.prepare.scale')}</Label>
-            <Input
-              id="{id}-scale"
-              type="number"
-              min="1"
-              max="1000"
-              step="any"
-              value={orientation.scale}
-              onchange={changeNumber(orientation.scale, (value) => {
-                orientation.scale = value;
-              })}
-            />
-          </div>
-        </div>
-        {#if mesh && bed && !onBed}
-          <p class="text-sm text-destructive" role="status">
-            {t('slicer.prepare.outside')}
-          </p>
-        {/if}
-      </fieldset>
-
-      <div class="grid gap-2 border-t border-border pt-3">
-        <Label for="{id}-storage">{t('slicer.prepare.destination')}</Label>
-        {#if destinations.length > 0}
-          <Select value={storage} onValueChange={chooseStorage}>
-            <SelectTrigger id="{id}-storage" disabled={busy}>
-              <SelectValue>{storageLabel}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {#each destinations as one (one.name)}
-                <SelectItem value={one.name} label={one.label}
-                  >{one.label}</SelectItem
-                >
-              {/each}
-            </SelectContent>
-          </Select>
-        {:else if !destinationsLoading && !destinationFault}
-          <p class="text-sm text-muted-foreground">
-            {t('slicer.prepare.noStorage')}
-          </p>
-        {/if}
-        <p class="text-xs text-muted-foreground">
-          {t('slicer.prepare.saveHint')}
-        </p>
-        <Button disabled={!canSlice} onclick={() => void submit()}
-          >{t(busy ? 'slicer.prepare.saving' : 'slicer.prepare.slice')}</Button
+      {#if noticeText}
+        <p
+          class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
+          data-part="plate-notice"
         >
-      </div>
-    </aside>
+          {noticeText}
+        </p>
+      {/if}
+    </div>
   </div>
+
+  <PlateStatus
+    parts={plate.parts.length}
+    selected={plate.selected.length}
+    {selectedName}
+    {bed}
+    printerName={printer?.name}
+    {blocked}
+    blockedId="{id}-blocked"
+    {t}
+  />
 </div>
 
 <style>
-  .plate-shell {
-    grid-template-rows: auto 1fr auto;
+  .workspace {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    /* The workspace fills the window between the app's header and its phone
+       bar; both heights are published by the app shell. */
+    block-size: calc(
+      100svh - var(--app-header-height, 0px) - var(--app-phone-bar-height, 0px)
+    );
+    min-block-size: 28rem;
   }
 
-  @container (width >= 54rem) {
-    .workspace-grid {
-      grid-template-columns: minmax(0, 1fr) minmax(17rem, 21rem);
-    }
+  canvas[data-mode='layflat'] {
+    cursor: crosshair;
+  }
 
-    .plate-stage {
-      min-block-size: 34rem;
-    }
+  canvas:global([data-hover='move']) {
+    cursor: grab;
+  }
+
+  canvas:global([data-hover='layflat']) {
+    cursor: pointer;
   }
 </style>

@@ -19,7 +19,7 @@ import {
   updateSlicers,
   viewOf,
 } from '../../test/fakes';
-import { bed, testPrepare } from '../prepare-panel/prepare-fixtures';
+import { bed, henry, testPrepare } from '../prepare-panel/prepare-fixtures';
 import SlicerPage from './slicer-page.svelte';
 
 const at = (state: Partial<PageState> = {}) =>
@@ -276,14 +276,12 @@ describe('the slicer page', () => {
     expect(install).toHaveBeenCalledWith('2.9.7', false);
   });
 
-  it('lists the jobs on their own tab, searches them and cancels one', async () => {
+  it('lists the jobs on their own page, searches them and cancels one', async () => {
     const view = viewOf('ready', adminSlicers, everybodysJobs);
     const cancel = vi.spyOn(view, 'cancel');
-    const address = at();
-    await render(SlicerPage, { view, t, address });
+    await render(SlicerPage, { view, t, address: at({ tab: 'jobs' }) });
 
-    await page.getByRole('tab', { name: /Jobs/u }).click();
-    expect(address.state.tab).toBe('jobs');
+    await expect.element(page.getByTestId('job-row').first()).toBeVisible();
     expect(page.getByTestId('job-row').elements()).toHaveLength(4);
 
     const search = page.getByRole('searchbox', { name: 'Search the jobs' });
@@ -381,7 +379,7 @@ describe('the slicer page', () => {
     }
   });
 
-  it('titles the page Slicing above its tabs', async () => {
+  it('titles the page Slicing above its lists', async () => {
     await render(SlicerPage, {
       view: viewOf('ready', adminSlicers, everybodysJobs),
       t,
@@ -393,17 +391,14 @@ describe('the slicer page', () => {
     expect(heading.element().classList.contains('sr-only')).toBe(false);
   });
 
-  it('documents the routes on the API tab, with the address of this server', async () => {
-    const address = at();
+  it('documents the routes on the API page, with the address of this server', async () => {
     await render(SlicerPage, {
       view: viewOf('ready', adminSlicers, everybodysJobs),
       t,
-      address,
+      address: at({ tab: 'api' }),
       apiBase: 'http://printers.local:8080/api/v1/modules/ns',
     });
 
-    await page.getByRole('tab', { name: 'API' }).click();
-    expect(address.state.tab).toBe('api');
     await expect
       .element(page.getByRole('textbox', { name: 'Base address' }))
       .toHaveValue('http://printers.local:8080/api/v1/modules/ns');
@@ -481,40 +476,70 @@ describe('the slicer page', () => {
     expect(address.state.slice).toBe('local:box.3mf');
   });
 
-  it('opens a model from Storage in Prepare and navigates to its slicing job', async () => {
-    const address = at({ tab: 'prepare', model: 'local:parts/bracket.stl' });
+  it('opens on the build plate with the model from Storage', async () => {
     await render(SlicerPage, {
       view: viewOf(
         'ready',
-        {
-          ...adminSlicers,
-          prepare_beds: { 'core-one-petg': bed },
-        },
+        { ...adminSlicers, prepare_beds: { 'core-one-petg': bed } },
         everybodysJobs,
       ),
       t,
-      address,
+      address: at({ model: 'local:parts/bracket.stl' }),
       prepare: testPrepare,
+      devices: [henry],
     });
 
     await expect
-      .element(page.getByRole('tab', { name: 'Prepare' }))
-      .toHaveAttribute('data-state', 'active');
+      .element(page.getByTestId('plate-status'))
+      .toMatchTextContent('1 part');
     await expect
-      .element(page.getByText('bracket.stl', { exact: true }))
-      .toBeVisible();
-    const save = page.getByRole('button', { name: 'Save and slice' });
-    await expect.element(save).toBeEnabled();
-    await save.click();
-    await expect
-      .poll(() => address.state)
-      .toMatchObject({ tab: 'jobs', job: 'placed-job', model: undefined });
-    await expect
-      .element(page.getByText('This job is not listed'))
-      .not.toBeInTheDocument();
-    await expect
-      .element(page.getByText('local: bracket-placed.stl', { exact: true }))
-      .toBeVisible();
+      .element(page.getByRole('button', { name: 'Print', exact: true }))
+      .toBeEnabled();
+    // The workspace is the page: no title and no tabs above it.
+    expect(page.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
+    expect(page.getByRole('tab').elements()).toHaveLength(0);
+  });
+
+  it('reaches the versions, the jobs and the API from the plate’s menu', async () => {
+    await render(SlicerPage, {
+      view: viewOf('ready', adminSlicers, everybodysJobs),
+      t,
+      address: at(),
+      prepare: testPrepare,
+      devices: [henry],
+    });
+
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    const items = page.getByRole('menuitem');
+    await expect.element(items.first()).toBeVisible();
+    expect(
+      items
+        .elements()
+        .map((item) => [item.textContent, item.getAttribute('href')]),
+    ).toEqual([
+      ['Slicers', '?tab=slicers'],
+      ['Jobs (2 running)', '?tab=jobs'],
+      ['API', '?tab=api'],
+    ]);
+  });
+
+  it('leads back to the build plate from the lists', async () => {
+    for (const tab of ['slicers', 'jobs', 'api'] as const) {
+      const screen = await render(SlicerPage, {
+        view: viewOf('ready', adminSlicers, everybodysJobs),
+        t,
+        address: at({ tab }),
+        prepare: testPrepare,
+        devices: [henry],
+      });
+      await expect
+        .element(page.getByRole('link', { name: 'Build plate' }))
+        .toHaveAttribute('href', '?');
+      await expect
+        .element(page.getByRole('heading', { level: 1 }))
+        .toHaveTextContent(t(`slicer.tab.${tab}`));
+      await screen.unmount();
+    }
   });
 
   it('requires a saved profile and sends its name with an STL job', async () => {

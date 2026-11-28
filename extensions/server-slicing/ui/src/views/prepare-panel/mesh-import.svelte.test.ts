@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 
 import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 import { combineParts, readMeshFile } from './mesh-import';
-import { fits, orientedModel, readModel, upright } from './model';
+import { Plate } from '../../plate/plate.svelte';
 
 import { bed, loadFixture } from './prepare-fixtures';
 
@@ -73,15 +73,16 @@ it('checks the file size and matches the extension to the file signature', async
   ).rejects.toThrow('signature');
 });
 
-it('centres a plain ASCII STL in the editor and leaves it without saved placement', async () => {
-  const { geometry, placedAt, floor } = await readModel(
-    await loadFixture('plain.stl', 'PLAIN.STL'),
-  );
-  expect(placedAt).toBeUndefined();
-  expect(floor).toBe(0);
-  expect(geometry.boundingBox?.min.toArray()).toEqual([-2, -3, -2]);
-  expect(geometry.boundingBox?.max.toArray()).toEqual([2, 3, 2]);
-  geometry.dispose();
+it('places a plain ASCII STL in free space, without saved placement', async () => {
+  const model = await readMeshFile(await loadFixture('plain.stl', 'PLAIN.STL'));
+  expect(model.preservePlacement).toBe(false);
+  const plate = new Plate(() => bed);
+  plate.add(model, 'PLAIN.STL');
+  const [part] = plate.parts;
+  if (!part) throw new Error('The STL is not on the plate');
+  expect([part.x, part.y, part.z]).toEqual([125, 110, 0]);
+  expect(part.size).toEqual({ halfX: 2, halfY: 3, height: 4 });
+  plate.dispose();
 });
 
 it.each(['prusa-volumes.3mf', 'bambu-parts.3mf'])(
@@ -113,13 +114,11 @@ it.each(['prusa-incomplete-roles.3mf', 'bambu-unknown-role.3mf'])(
 );
 
 it('lifts a 3MF from below the plate and keeps its stored XY position', async () => {
-  const { geometry, placedAt, floor } = await readModel(
-    await loadFixture('below-bed.3mf'),
-  );
-  if (!placedAt) throw new Error('The 3MF did not keep its placement');
-  expect(placedAt).toEqual([22, 32]);
-  const { bounds } = orientedModel(geometry, upright, floor);
-  expect(bounds.min.z).toBe(0);
-  expect(fits(bounds, placedAt, bed)).toBe(true);
-  geometry.dispose();
+  const plate = new Plate(() => bed);
+  plate.add(await readMeshFile(await loadFixture('below-bed.3mf')), 'below');
+  const [part] = plate.parts;
+  if (!part) throw new Error('The 3MF is not on the plate');
+  expect([part.x, part.y, part.z]).toEqual([22, 32, 0]);
+  expect(plate.outside).toEqual([]);
+  plate.dispose();
 });

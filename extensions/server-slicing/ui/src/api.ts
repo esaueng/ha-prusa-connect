@@ -14,6 +14,7 @@ export type SlicerApi = Pick<
   | 'pinSlicer'
   | 'cancelJob'
   | 'submitJob'
+  | 'readJob'
 >;
 export type Slicers = components['schemas']['Slicers'];
 export type Offer = components['schemas']['Offer'];
@@ -24,6 +25,7 @@ export type Job = components['schemas']['Job'];
 export type JobList = components['schemas']['JobList'];
 export type STLBed = components['schemas']['STLBed'];
 export type SubmitBody = components['schemas']['SubmitBody'];
+export type ProfileSettings = components['schemas']['ProfileSettings'];
 
 /** The module's routes, on the host's client. */
 export const apiOn = (host: Pick<ModuleHost, 'client'>): SlicerApi =>

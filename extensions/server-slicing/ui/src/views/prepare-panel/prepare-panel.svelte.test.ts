@@ -1,240 +1,288 @@
-import { page } from 'vitest/browser';
-import { expect, it, vi } from 'vitest';
-import { render } from 'vitest-browser-svelte';
+import { formatDuration } from '@prusa/connect-ui/i18n';
+import { BoxGeometry, Matrix4 } from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { page, userEvent } from 'vitest/browser';
+import { describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-svelte';
 
 import { t } from '../../test/fakes';
-import { readModel } from './model';
+import { makeSTL } from './model';
+import type { PrepareApi } from './prepare-api';
 import {
   assembledFile,
   bed,
+  charlie,
+  henry,
   loadFixture,
-  placedJob,
+  memory,
+  profileSettings,
+  slicedJob,
   testPrepare,
+  xl,
 } from './prepare-fixtures';
 import PreparePanel from './prepare-panel.svelte';
 
-it('saves the same placed model the editor shows and queues it with the profile', async () => {
-  const model = vi.fn((...args: Parameters<typeof testPrepare.read>) =>
-    testPrepare.read(...args),
-  );
-  const save = vi.fn((...args: Parameters<typeof testPrepare.save>) =>
-    testPrepare.save(...args),
-  );
-  const submit = vi.fn((...args: Parameters<typeof testPrepare.submit>) =>
-    testPrepare.submit(...args),
-  );
-  const onSliced = vi.fn();
-
-  await page.viewport(1280, 840);
-  await render(PreparePanel, {
-    props: {
-      api: { ...testPrepare, read: model, save, submit },
-      beds: { 'henry-petg': bed },
-      source: 'local:parts/bracket.stl',
-      hasSlicer: true,
-      t,
-      onSliced,
-    },
-  });
-
-  const slice = page.getByRole('button', { name: 'Save and slice' });
-  await expect.element(slice).toBeEnabled();
-  expect(model).toHaveBeenCalledWith(
-    'local:parts/bracket.stl',
-    expect.any(AbortSignal),
-  );
-  await expect.element(page.getByText('250 × 220 × 270 mm')).toBeVisible();
-  const top = page.getByRole('button', { name: 'Top view' });
-  await expect.element(top).toBeEnabled();
-  await top.click();
-
-  const x = page.getByLabelText('X (mm)', { exact: true });
-  await x.fill('-100');
-  await page.getByLabelText('Y (mm)', { exact: true }).click();
-  await expect
-    .element(page.getByText('Move or scale the model to fit the print volume.'))
-    .toBeVisible();
-  await expect.element(slice).toBeDisabled();
-
-  await x.fill('50');
-  await page.getByLabelText('Y (mm)', { exact: true }).fill('75');
-  await page.getByLabelText('Rotate Z (°)', { exact: true }).fill('90');
-  const scale = page.getByLabelText('Scale (%)', { exact: true });
-  await scale.fill('150');
-  await page.getByRole('heading', { name: 'Placement' }).click();
-
-  await expect.element(slice).toBeEnabled();
-  await slice.click();
-  await expect.poll(() => onSliced.mock.calls).toEqual([[placedJob]]);
-
-  const [storage, name, body] = save.mock.calls[0] ?? [];
-  expect(storage).toBe('local');
-  expect(name).toMatch(/^bracket-placed-.+\.stl$/u);
-  expect(submit).toHaveBeenCalledWith(
-    'local',
-    name,
-    'henry-petg',
-    expect.any(AbortSignal),
-  );
-  if (!body) throw new Error('No model was saved');
-
-  const written = new STLLoader().parse(await body.arrayBuffer());
-  written.computeBoundingBox();
-  expect(written.boundingBox?.min.toArray()).toEqual([35, 67.5, 0]);
-  expect(written.boundingBox?.max.toArray()).toEqual([65, 82.5, 45]);
-  written.dispose();
-  const reopened = await readModel(new File([body], name ?? 'placed.stl'));
-  expect(reopened.placedAt).toEqual([50, 75]);
-  reopened.geometry.dispose();
+/** An API that answers like the fixtures and records each call. */
+const recording = (more: Partial<PrepareApi> = {}) => ({
+  destinations: vi.fn(more.destinations ?? testPrepare.destinations),
+  read: vi.fn(more.read ?? testPrepare.read),
+  save: vi.fn(more.save ?? testPrepare.save),
+  submit: vi.fn(more.submit ?? testPrepare.submit),
+  job: vi.fn(more.job ?? testPrepare.job),
+  download: vi.fn(more.download ?? testPrepare.download),
+  print: vi.fn(more.print ?? testPrepare.print),
 });
 
-it('keeps the empty editor usable on a narrow screen', async () => {
-  await page.viewport(390, 844);
-  await render(PreparePanel, {
-    props: {
-      api: testPrepare,
-      hasSlicer: true,
-      beds: { 'charlie-pla': bed },
-      t,
-      onSliced: vi.fn(),
-    },
-  });
+const xlBed = { min_x: 0, min_y: 0, max_x: 360, max_y: 360, height: 360 };
 
-  await expect
-    .element(page.getByRole('button', { name: 'Open model' }))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole('button', { name: 'Save and slice' }))
-    .toBeDisabled();
-  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+const props = (api: PrepareApi, more: Record<string, unknown> = {}) => ({
+  api,
+  beds: { 'core-one-petg': bed, 'xl-pla': xlBed },
+  profileSettings: {
+    ...profileSettings,
+    'xl-pla': { filament_type: 'PLA', layer_height_mm: 0.2 },
+  },
+  hasSlicer: true,
+  devices: [henry, charlie, xl],
+  remember: memory(),
+  source: 'local:parts/bracket.stl',
+  t,
+  ...more,
 });
 
-it.each(['pick', 'drop'])(
-  'imports a 3MF by %s and slices its placed geometry',
-  async (input) => {
-    const save = vi.fn((...args: Parameters<typeof testPrepare.save>) =>
-      testPrepare.save(...args),
-    );
-    const submit = vi.fn((...args: Parameters<typeof testPrepare.submit>) =>
-      testPrepare.submit(...args),
-    );
-    const onSliced = vi.fn();
-    await page.viewport(1280, 840);
-    const { container } = await render(PreparePanel, {
-      props: {
-        api: { ...testPrepare, save, submit },
-        beds: { 'henry-petg': bed },
-        hasSlicer: true,
-        t,
-        onSliced,
-      },
-    });
+const status = () => page.getByTestId('plate-status');
 
-    const file = await assembledFile();
-    if (input === 'pick') {
-      const picker =
-        container.querySelector<HTMLInputElement>('input[type="file"]');
-      if (!picker) throw new Error('Prepare did not render the file picker');
-      await page.elementLocator(picker).upload(file);
-    } else {
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(file);
-      page
-        .getByLabelText('3D build plate view')
-        .element()
-        .dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
-    }
+describe('the build-plate workspace', () => {
+  it('slices the plate and prints it on the idle printer', async () => {
+    const api = recording();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api) });
 
-    const slice = page.getByRole('button', { name: 'Save and slice' });
-    await expect.element(slice).toBeEnabled();
-    await expect
-      .element(page.getByText(/Apply any cuts made with negative volumes/u))
-      .toBeVisible();
-    const x = page.getByLabelText('X (mm)', { exact: true });
-    const y = page.getByLabelText('Y (mm)', { exact: true });
-    const xInput = x.element();
-    const yInput = y.element();
-    if (
-      !(xInput instanceof HTMLInputElement) ||
-      !(yInput instanceof HTMLInputElement)
-    )
-      throw new Error('Prepare did not render XY controls');
-    expect(xInput.valueAsNumber).toBeCloseTo(96.6);
-    expect(yInput.valueAsNumber).toBeCloseTo(55.8);
-    await x.fill('100');
-    await page.getByRole('heading', { name: 'Placement' }).click();
-    await slice.click();
-    await expect.poll(() => onSliced.mock.calls).toEqual([[placedJob]]);
-
-    const [storage, name, body] = save.mock.calls[0] ?? [];
-    expect(name).toMatch(/^assembled-placed-.+\.stl$/u);
-    expect(submit).toHaveBeenCalledWith(
-      storage,
-      name,
-      'henry-petg',
+    await expect.element(status()).toMatchTextContent('1 part');
+    expect(api.read).toHaveBeenCalledWith(
+      'local:parts/bracket.stl',
       expect.any(AbortSignal),
     );
-    if (!body) throw new Error('No assembly was saved');
-    const written = new STLLoader().parse(await body.arrayBuffer());
-    expect(written.getAttribute('position').count).toBe(24);
-    written.computeBoundingBox();
-    const bounds = written.boundingBox;
-    if (!bounds) throw new Error('The assembly has no bounds');
-    expect(bounds.min.x).toBeCloseTo(69.6);
-    expect(bounds.min.y).toBeCloseTo(25.4);
-    expect(bounds.min.z).toBe(0);
-    expect(bounds.max.x).toBeCloseTo(130.4);
-    expect(bounds.max.y).toBeCloseTo(86.2);
-    expect(bounds.max.z).toBeCloseTo(22.7);
-    written.dispose();
-  },
-);
+    await expect
+      .element(status())
+      .toMatchTextContent('Henry · bed 250 × 220 mm');
+    const print = page.getByRole('button', { name: 'Print', exact: true });
+    await expect.element(print).toBeEnabled();
+    // No slice has run, so the button shows no time.
+    expect(print.element().textContent).not.toContain(formatDuration(12_300));
 
-it('shows the import limit when a 3MF expands beyond the archive budget', async () => {
-  const { container } = await render(PreparePanel, {
-    props: {
-      api: testPrepare,
-      beds: { 'henry-petg': bed },
-      hasSlicer: true,
-      t,
-      onSliced: vi.fn(),
-    },
+    await print.click();
+    await expect.element(page.getByText('Printing on Henry')).toBeVisible();
+    expect(api.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: 'core-one-petg',
+        settings: undefined,
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(api.print).toHaveBeenCalledWith({
+      deviceId: 'henry',
+      storage: 'local',
+      source: slicedJob.result?.path,
+      name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
+    });
+    // The time comes from the finished slice of this plate.
+    await expect
+      .element(page.getByTestId('print-button'))
+      .toMatchTextContent(formatDuration(12_300));
   });
-  const picker =
-    container.querySelector<HTMLInputElement>('input[type="file"]');
-  if (!picker) throw new Error('Prepare did not render the file picker');
-  await page
-    .elementLocator(picker)
-    .upload(await loadFixture('large-archive.3mf'));
-  await expect
-    .element(page.getByText(/The model exceeds the import limits/u))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole('button', { name: 'Save and slice' }))
-    .toBeDisabled();
+
+  it('turns Print into Add to queue for a busy printer and says why it is off', async () => {
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api, { remember }) });
+
+    await expect.element(status()).toMatchTextContent('1 part');
+    const queue = page.getByRole('button', { name: 'Add to queue' });
+    await expect.element(queue).toBeDisabled();
+    const reason =
+      'The printer is busy. Adding to its queue needs the Print queue module, and this module cannot reach it.';
+    await expect.element(status()).toMatchTextContent(reason);
+    await expect.element(queue).toHaveAccessibleDescription(reason);
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  it('resizes the bed to the printer chosen and keeps the choice', async () => {
+    const remember = memory();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, {
+      props: props(recording(), { remember, source: undefined }),
+    });
+
+    await page.getByTestId('printer-picker').click();
+    await page.getByRole('menuitemradio', { name: /Xavier/u }).click();
+    await expect
+      .element(status())
+      .toMatchTextContent('Xavier · bed 360 × 360 mm');
+    expect(remember.read('plate.printer')).toBe('xl');
+    await expect
+      .element(page.getByText('Add a model to the plate.'))
+      .toBeVisible();
+  });
+
+  it('rotates with R, removes with Delete and takes it back with Ctrl+Z', async () => {
+    // A part 10 × 30 mm near the right edge fits until it is turned.
+    const geometry = new BoxGeometry(10, 30, 10);
+    const file = new File(
+      [
+        makeSTL([
+          { geometry, matrix: new Matrix4().makeTranslation(240, 100, 5) },
+        ]),
+      ],
+      'tall.stl',
+    );
+    geometry.dispose();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, {
+      props: props(recording({ read: () => Promise.resolve(file) })),
+    });
+    await expect.element(status()).toMatchTextContent('1 part');
+    const print = page.getByRole('button', { name: 'Print', exact: true });
+    await expect.element(print).toBeEnabled();
+
+    await userEvent.keyboard('r');
+    await expect
+      .element(status())
+      .toMatchTextContent('A part is outside the print volume.');
+    await expect.element(print).toBeDisabled();
+
+    await userEvent.keyboard('{Control>}z{/Control}');
+    await expect.element(print).toBeEnabled();
+
+    await userEvent.keyboard('{Delete}');
+    await expect.element(status()).toMatchTextContent('0 parts');
+    await userEvent.keyboard('{Control>}z{/Control}');
+    await expect.element(status()).toMatchTextContent('1 part');
+  });
+
+  it('sends the settings chosen, and keeps them for the printer', async () => {
+    const api = recording();
+    const remember = memory();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api, { remember }) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByTestId('print-settings').click();
+    await page.getByRole('radio', { name: 'Everywhere' }).click();
+    await page.getByRole('button', { name: 'One wall more' }).click();
+    await userEvent.keyboard('{Escape}');
+
+    await page
+      .getByRole('button', { name: 'More ways to finish the plate' })
+      .click();
+    await page.getByRole('menuitem', { name: 'Slice only' }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+    expect(api.submit.mock.calls[0]?.[0].settings).toEqual({
+      supports: 'everywhere',
+      walls: 3,
+    });
+    expect(api.print).not.toHaveBeenCalled();
+    expect(remember.read('plate.choices.henry')).toContain('"walls":3');
+  });
+
+  it('fits a narrow screen without scrolling sideways', async () => {
+    await page.viewport(390, 844);
+    await render(PreparePanel, {
+      props: props(recording(), { source: undefined }),
+    });
+    await expect
+      .element(page.getByRole('button', { name: 'Add' }))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole('button', { name: 'Print', exact: true }))
+      .toBeDisabled();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
+  });
 });
 
-it('asks for geometry only when a project has unknown part roles', async () => {
-  const { container } = await render(PreparePanel, {
-    props: {
-      api: testPrepare,
-      beds: { 'henry-petg': bed },
-      hasSlicer: true,
-      t,
-      onSliced: vi.fn(),
+describe('a 3MF on the build plate', () => {
+  const pick = async (container: HTMLElement, file: File): Promise<void> => {
+    const picker =
+      container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!picker) throw new Error('The workspace drew no file picker');
+    await page.elementLocator(picker).upload(file);
+  };
+
+  it.each(['pick', 'drop'])(
+    'puts each object of a 3MF on the plate by %s, where the file put it',
+    async (input) => {
+      const api = recording();
+      await page.viewport(1440, 900);
+      const { container } = await render(PreparePanel, {
+        props: props(api, { source: undefined }),
+      });
+
+      const file = await assembledFile();
+      if (input === 'pick') {
+        await pick(container, file);
+      } else {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        page
+          .getByLabelText('3D build plate view')
+          .element()
+          .dispatchEvent(
+            new DragEvent('drop', { bubbles: true, dataTransfer }),
+          );
+      }
+
+      // The two instances are two parts, not one merged mesh.
+      await expect.element(status()).toMatchTextContent('2 parts');
+      await expect
+        .element(page.getByText(/Apply any cuts made with negative volumes/u))
+        .toBeVisible();
+
+      await page
+        .getByRole('button', { name: 'More ways to finish the plate' })
+        .click();
+      await page.getByRole('menuitem', { name: 'Save positioned STL' }).click();
+      await expect.poll(() => api.save.mock.calls.length).toBe(1);
+      const [, name, body] = api.save.mock.calls[0] ?? [];
+      expect(name).toMatch(/^assembled-placed-.+\.stl$/u);
+      if (!body) throw new Error('No plate was saved');
+      const written = new STLLoader().parse(await body.arrayBuffer());
+      expect(written.getAttribute('position').count).toBe(24);
+      written.computeBoundingBox();
+      const bounds = written.boundingBox;
+      if (!bounds) throw new Error('The plate has no bounds');
+      expect(bounds.min.x).toBeCloseTo(66.2);
+      expect(bounds.min.y).toBeCloseTo(25.4);
+      expect(bounds.min.z).toBe(0);
+      expect(bounds.max.x).toBeCloseTo(127);
+      expect(bounds.max.y).toBeCloseTo(86.2);
+      expect(bounds.max.z).toBeCloseTo(22.7);
+      written.dispose();
     },
+  );
+
+  it('says when a 3MF expands beyond the import limits', async () => {
+    const { container } = await render(PreparePanel, {
+      props: props(recording(), { source: undefined }),
+    });
+    await pick(container, await loadFixture('large-archive.3mf'));
+    await expect
+      .element(page.getByText(/The model exceeds the import limits/u))
+      .toBeVisible();
+    await expect.element(status()).toMatchTextContent('0 parts');
   });
-  const picker =
-    container.querySelector<HTMLInputElement>('input[type="file"]');
-  if (!picker) throw new Error('Prepare did not render the file picker');
-  await page
-    .elementLocator(picker)
-    .upload(await loadFixture('bambu-unknown-role.3mf'));
-  await expect
-    .element(page.getByText(/Could not determine the 3MF part roles/u))
-    .toBeVisible();
-  await expect
-    .element(page.getByRole('button', { name: 'Save and slice' }))
-    .toBeDisabled();
+
+  it('asks for geometry only when a project has unknown part roles', async () => {
+    const { container } = await render(PreparePanel, {
+      props: props(recording(), { source: undefined }),
+    });
+    await pick(container, await loadFixture('bambu-unknown-role.3mf'));
+    await expect
+      .element(page.getByText(/Could not determine the 3MF part roles/u))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole('button', { name: 'Print', exact: true }))
+      .toBeDisabled();
+  });
 });

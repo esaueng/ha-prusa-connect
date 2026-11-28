@@ -1,7 +1,8 @@
+import { printStoredFile } from '@prusa/connect-ui/data';
 import { parseFileRef, type ModuleHost } from '@prusa/connect-ui/slots';
 
 import type { Job, SlicerApi } from '../../api';
-
+import type { PrintSettings } from '../../plate/print-settings';
 import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 
 export const placedName = (fileName: string): string => {
@@ -21,21 +22,47 @@ export interface Destination {
   label: string;
 }
 
+/** One sliced plate to print, from the storage the job wrote it to. */
+export interface PrintRequest {
+  deviceId: string;
+  storage: string;
+  /** The G-code's path in that storage. */
+  source: string;
+  /** The file's name on the printer. */
+  name: string;
+}
+
+/** The code a printer that refused the start is answered with. */
+export const COMMAND_REFUSED = 'core.printer/COMMAND_REFUSED';
+
 export interface PrepareApi {
-  destinations(signal: AbortSignal): Promise<Destination[]>;
-  read(ref: string, signal: AbortSignal): Promise<File>;
-  save(
+  readonly destinations: (signal: AbortSignal) => Promise<Destination[]>;
+  readonly read: (ref: string, signal: AbortSignal) => Promise<File>;
+  readonly save: (
     storage: string,
     name: string,
     body: Blob,
     signal: AbortSignal,
-  ): Promise<string>;
-  submit(
+  ) => Promise<string>;
+  readonly submit: (
+    request: {
+      storage: string;
+      path: string;
+      profile: string;
+      settings: PrintSettings | undefined;
+    },
+    signal: AbortSignal,
+  ) => Promise<Job>;
+  /** One job as it is now. */
+  readonly job: (id: string, signal: AbortSignal) => Promise<Job>;
+  /** A file from a storage, such as the G-code a job wrote. */
+  readonly download: (
     storage: string,
     path: string,
-    profile: string,
     signal: AbortSignal,
-  ): Promise<Job>;
+  ) => Promise<Blob>;
+  /** Sends the G-code to an idle printer and starts it. A refusal throws. */
+  readonly print: (request: PrintRequest) => Promise<void>;
 }
 
 const readFile = async (response: Response, name: string): Promise<File> => {
@@ -61,7 +88,7 @@ const readFile = async (response: Response, name: string): Promise<File> => {
 
 export const prepareOn = (
   client: ModuleHost['client'],
-  api: Pick<SlicerApi, 'submitJob'>,
+  api: Pick<SlicerApi, 'submitJob' | 'readJob'>,
 ): PrepareApi => ({
   async destinations(signal) {
     const page = await client.listStorages({}, signal);
@@ -92,7 +119,7 @@ export const prepareOn = (
     );
     return result.path;
   },
-  submit(storage, path, profile, signal) {
+  submit({ storage, path, profile, settings }, signal) {
     return api.submitJob(
       {
         body: {
@@ -100,9 +127,37 @@ export const prepareOn = (
           profile,
           keep_placement: true,
           format: 'gcode',
+          // The STL has a fresh name each time the plate changes, so its
+          // G-code is only ever this plate's.
+          overwrite: true,
+          ...(settings ? { settings } : {}),
         },
       },
       signal,
     );
+  },
+  job(id, signal) {
+    return api.readJob({ path: { id } }, signal);
+  },
+  async download(storage, path, signal) {
+    const response = await client.downloadStorageObject(
+      { path: { storage }, query: { path } },
+      signal,
+    );
+    return response.blob();
+  },
+  async print({ deviceId, storage, source, name }) {
+    const outcome = await printStoredFile(client, {
+      deviceId,
+      storage,
+      source,
+      name,
+    });
+    if (!outcome.ok) {
+      // describeFault reads a code and a message from a thrown value.
+      throw Object.assign(new Error(outcome.machineReason ?? ''), {
+        code: outcome.faultCode ?? COMMAND_REFUSED,
+      });
+    }
   },
 });
