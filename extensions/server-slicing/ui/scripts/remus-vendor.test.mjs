@@ -41,7 +41,7 @@ const HOME = mkdtempSync(path.join(tmpdir(), 'rvt-home-'));
 
 /**
  * `env` without any git variable, with the empty home, and with no global or
- * system git configuration.
+ * system git configuration or attributes.
  * @param {NodeJS.ProcessEnv} env
  */
 const scrub = (env) => ({
@@ -52,6 +52,7 @@ const scrub = (env) => ({
   XDG_CONFIG_HOME: HOME,
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',
+  GIT_ATTR_NOSYSTEM: '1',
 });
 
 /** The environment of every child. */
@@ -537,4 +538,24 @@ void test('a later rule that changes the bytes of a vendored file is refused, an
       rmSync(root, { recursive: true, force: true });
     }
   }
+});
+
+void test('every git of these tests reads no system or user configuration or attributes', () => {
+  // git reads the system attributes file unless GIT_ATTR_NOSYSTEM is set, and
+  // writing that file to prove it would change this machine for everyone.
+  const env = scrub({
+    ...process.env,
+    GIT_ATTR_NOSYSTEM: '0',
+    GIT_CONFIG_NOSYSTEM: '0',
+    GIT_DIR: '/elsewhere',
+    HOME: '/home/someone',
+  });
+  assert.equal(env.GIT_ATTR_NOSYSTEM, '1');
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
+  assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null');
+  assert.equal(env.GIT_DIR, undefined);
+  assert.equal(env.HOME, HOME);
+  assert.equal(env.XDG_CONFIG_HOME, HOME);
+  assert.deepEqual(readdirSync(HOME), []);
+  assert.equal(ENV.GIT_ATTR_NOSYSTEM, '1');
 });
