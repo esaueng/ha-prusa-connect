@@ -532,6 +532,25 @@ describe('a change that changes nothing', () => {
   });
 });
 
+describe('a drag back to where it began', () => {
+  it('records no Undo step', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    plate.press(part.id, false);
+    plate.beginMove();
+    plate.moveBy(30, 10);
+    plate.moveBy(0, 0);
+    plate.endMove();
+    expect([plate.parts[0]?.x, plate.parts[0]?.y]).toEqual([100, 100]);
+
+    // Undo holds the adding and nothing after it.
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(plate.canUndo).toBe(false);
+    plate.dispose();
+  });
+});
+
 describe('Undo during a drag', () => {
   it('ends the drag, so the part Undo removed does not come back', () => {
     const plate = plateOf();
