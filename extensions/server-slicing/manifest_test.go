@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prusa3d/server-slicing/internal/routes"
 	"github.com/prusa3d/server-slicing/internal/settings"
 )
 
@@ -163,7 +164,7 @@ func TestTheManifestNamesWhatTheCodeIs(t *testing.T) {
 		}
 	}
 
-	for _, capability := range []string{"storage.stat", "storage.read", "storage.write", "access.check"} {
+	for _, capability := range []string{"storage.stat", "storage.read", "storage.write", "access.check", "routes.call"} {
 		if !strings.Contains(document, "  core-"+capability+": \"*\"\n") {
 			t.Errorf("the manifest does not require %s, which the module calls", capability)
 		}
@@ -171,6 +172,33 @@ func TestTheManifestNamesWhatTheCodeIs(t *testing.T) {
 
 	if !strings.Contains(document, "  data: true\n") {
 		t.Error("the manifest asks for no data directory, and the module cannot slice without one")
+	}
+}
+
+func TestTheManifestApprovesOnlyTheOptionalPrintQueue(t *testing.T) {
+	t.Parallel()
+
+	document := manifest(t)
+	_, block, found := strings.Cut(document, "\ncalls:\n")
+	if !found {
+		t.Fatal("the manifest does not declare calls")
+	}
+	var calls []string
+	for line := range strings.SplitSeq(block, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "-") {
+			break
+		}
+		calls = append(calls, strings.TrimPrefix(trimmed, "- "))
+	}
+	if len(calls) != 1 || calls[0] != routes.PrintQueueModule {
+		t.Fatalf("the calls block must ask only for %s", routes.PrintQueueModule)
+	}
+	if !strings.Contains(document, "\nsuggest:\n  "+routes.PrintQueueModule+": ") {
+		t.Fatal("the Print queue must be an optional suggestion")
 	}
 }
 

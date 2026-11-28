@@ -21,6 +21,8 @@
 //	POST   /jobs/upload            slice a project sent as the body
 //	GET    /jobs/{id}              one job
 //	POST   /jobs/{id}/cancel       stop one job
+//	POST   /jobs/{id}/enqueue      add the job's G-code to a printer's queue
+//	GET    /print-queue/{device}   whether the caller can add to this printer's queue
 //
 // Each path is relative to the address the server gives this module, so a
 // caller reaches the first one at /api/v1/modules/<namespace>/status.
@@ -60,7 +62,7 @@ import (
 // changelog_test.go holds the three together.
 const (
 	name    = "server-slicing"
-	release = extension.Version("0.6.1")
+	release = extension.Version("0.7.1")
 )
 
 // mebibyte is the unit the settings count memory in.
@@ -109,6 +111,7 @@ func run() error {
 	held := &module{
 		files:  storageapi.NewClient(conn),
 		access: accessapi.NewClient(conn),
+		calls:  routesapi.NewClient(conn),
 		log:    slog.New(slog.NewTextHandler(os.Stderr, nil)).With("module", name),
 	}
 	defer held.stop()
@@ -130,6 +133,7 @@ func run() error {
 type module struct {
 	files  jobs.Files
 	access jobs.Access
+	calls  routesapi.Modules
 	log    *slog.Logger
 
 	mu     sync.Mutex
@@ -155,7 +159,9 @@ func (m *module) methods() wirerpc.Methods {
 			return nil, nil
 		},
 		wirerpc.MethodConfigure: wirerpc.ConfigureGranted(m.configure),
-		routesapi.MethodServe:   routesapi.Serve(routes.New(routes.Service{State: m.current, Access: m.access})),
+		routesapi.MethodServe: routesapi.Serve(
+			routes.New(routes.Service{State: m.current, Access: m.access, Calls: m.calls}),
+		),
 	}
 }
 

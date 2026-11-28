@@ -12,9 +12,11 @@ import type { Job } from '../api';
 import { makeSTL, type PlacedMesh } from '../views/prepare-panel/model';
 import {
   placedName,
+  queueBlockOf,
   type PrepareApi,
 } from '../views/prepare-panel/prepare-api';
 import type { PrintSettings } from './print-settings';
+import { canRecheckQueue, type QueueBlock } from './printers';
 import {
   PageClosed,
   PlateChanged,
@@ -27,7 +29,7 @@ import {
 export const JOB_POLL_MS = 1000;
 
 /** What the flow is doing now. */
-export type FlowStep = 'idle' | 'saving' | 'slicing' | 'sending';
+export type FlowStep = 'idle' | 'saving' | 'slicing' | 'sending' | 'queueing';
 
 /** Everything one slice of the plate depends on. */
 export interface PlateInput {
@@ -98,6 +100,8 @@ export class PlateFlow {
   #fault = $state.raw<FaultText | undefined>(undefined);
   #notice = $state.raw<FlowNotice | undefined>(undefined);
   #sliced = $state.raw<{ signature: string; job: Job } | undefined>(undefined);
+  #queue = $state.raw<{ printer: string; block: QueueBlock | undefined }>();
+  #waiting = $state.raw<Readonly<Record<string, number | undefined>>>({});
   #saved: { meshKey: string; storage: string; path: string } | undefined;
   readonly #api: PrepareApi;
   readonly #signal: AbortSignal;
@@ -123,6 +127,24 @@ export class PlateFlow {
 
   get notice(): FlowNotice | undefined {
     return this.#notice;
+  }
+
+  queueBlock(printer: string | undefined): QueueBlock | undefined {
+    const queue = this.#queue;
+    return queue && queue.printer === printer ? queue.block : 'queueChecking';
+  }
+
+  waitingFor(printer: string): number | undefined {
+    return Object.hasOwn(this.#waiting, printer)
+      ? this.#waiting[printer]
+      : undefined;
+  }
+
+  async checkQueue(printer: string, selected: AbortSignal): Promise<void> {
+    const signal = AbortSignal.any([this.#signal, selected]);
+    this.#queue = { printer, block: 'queueChecking' };
+    const block = await this.#api.checkQueue(printer, signal);
+    if (!signal.aborted) this.#queue = { printer, block };
   }
 
   /** The finished job of the plate as it is, or undefined once it changed. */
@@ -170,35 +192,16 @@ export class PlateFlow {
     printer: { id: string; name: string },
     current: () => SendSnapshot,
   ): Promise<boolean> {
-    const pressed = current();
-    // Aborted the moment the plate stops being sendable. Every request of the
-    // print is sent with it, so one in flight is cut short and the SDK does
-    // not send it again, which its own retries would otherwise do.
-    const stale = new AbortController();
-    const send: Send = {
-      signal: AbortSignal.any([this.#signal, stale.signal]),
-      guard: () => {
-        this.#live();
-        if (stale.signal.aborted || !stillSendable(pressed, current())) {
-          stale.abort();
-          throw new PlateChanged();
-        }
-      },
-    };
-    const watch = $effect.root(() => {
-      $effect(() => {
-        if (!stillSendable(pressed, current())) stale.abort();
-      });
-    });
+    const { send, stopped } = this.#sendFor(current);
     try {
       const ok = await this.#run(async () => {
-        try {
-          const job = await this.#slicedJob(input, send);
-          const result = job.result;
-          if (!result) throw new Error('The job wrote no G-code');
-          send.guard();
-          this.#step = 'sending';
-          await this.#api.print(
+        const job = await stopped(this.#slicedJob(input, send));
+        const result = job.result;
+        if (!result) throw new Error('The job wrote no G-code');
+        send.guard();
+        this.#step = 'sending';
+        await stopped(
+          this.#api.print(
             {
               deviceId: printer.id,
               storage: result.storage,
@@ -207,14 +210,8 @@ export class PlateFlow {
             },
             send.signal,
             send.guard,
-          );
-        } catch (thrown) {
-          // A request cut short by the stale signal fails as a network
-          // error; it is the change the person should be told about.
-          if (stale.signal.aborted && !this.#signal.aborted)
-            throw new PlateChanged();
-          throw thrown;
-        }
+          ),
+        );
         this.#live();
         this.#notice = {
           key: 'slicer.plate.notice.printing',
@@ -224,7 +221,46 @@ export class PlateFlow {
       });
       return ok === true;
     } finally {
-      watch();
+      send.dispose();
+    }
+  }
+
+  /** Slices the plate if it changed, then adds the finished job to Print queue. */
+  async enqueue(
+    input: PlateInput,
+    printer: { id: string; name: string },
+    current: () => SendSnapshot,
+  ): Promise<void> {
+    const { send, stopped } = this.#sendFor(current);
+    try {
+      await this.#run(async () => {
+        this.#step = 'queueing';
+        const job = await stopped(this.#slicedJob(input, send));
+        send.guard();
+        this.#step = 'queueing';
+        try {
+          const { waiting } = await stopped(
+            this.#api.enqueue(job.id, printer.id, send.signal, send.guard),
+          );
+          this.#live();
+          this.#waiting = { ...this.#waiting, [printer.id]: waiting };
+          this.#notice = {
+            key: 'slicer.plate.notice.queued',
+            params: { printer: printer.name },
+          };
+        } catch (error) {
+          const block = queueBlockOf(describeFault(error).code);
+          if (
+            block !== undefined &&
+            !canRecheckQueue(block) &&
+            this.#queue?.printer === printer.id
+          )
+            this.#queue = { printer: printer.id, block };
+          throw error;
+        }
+      });
+    } finally {
+      send.dispose();
     }
   }
 
@@ -243,6 +279,11 @@ export class PlateFlow {
     });
   }
 
+  /** Stops the step once the workspace has closed, before anything else is sent. */
+  #live(): void {
+    if (this.#signal.aborted) throw new PageClosed();
+  }
+
   /** What an action that sends nothing to a printer waits under: the page alone. */
   get #pageOnly(): Send {
     return {
@@ -253,9 +294,46 @@ export class PlateFlow {
     };
   }
 
-  /** Stops the step once the workspace has closed, before anything else is sent. */
-  #live(): void {
-    if (this.#signal.aborted) throw new PageClosed();
+  /**
+   * What a print or a queue entry waits under. `current` is read now, as the
+   * snapshot the button was pressed for. The guard compares it with the page
+   * as it is, and the signal is aborted the moment they stop matching, so a
+   * request in flight is cut short and the SDK does not send it again, which
+   * its own retries would otherwise do. `stopped` turns a request the stale
+   * signal cut short into the change the person is told about.
+   */
+  #sendFor(current: () => SendSnapshot): {
+    send: Send & { dispose: () => void };
+    stopped: <T>(step: Promise<T>) => Promise<T>;
+  } {
+    const pressed = current();
+    const stale = new AbortController();
+    const watch = $effect.root(() => {
+      $effect(() => {
+        if (!stillSendable(pressed, current())) stale.abort();
+      });
+    });
+    const send = {
+      signal: AbortSignal.any([this.#signal, stale.signal]),
+      guard: () => {
+        this.#live();
+        if (stale.signal.aborted || !stillSendable(pressed, current())) {
+          stale.abort();
+          throw new PlateChanged();
+        }
+      },
+      dispose: watch,
+    };
+    const stopped = async <T>(step: Promise<T>): Promise<T> => {
+      try {
+        return await step;
+      } catch (thrown) {
+        if (stale.signal.aborted && !this.#signal.aborted)
+          throw new PlateChanged();
+        throw thrown;
+      }
+    };
+    return { send, stopped };
   }
 
   async #run<T>(work: () => Promise<T>): Promise<T | undefined> {

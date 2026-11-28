@@ -21,10 +21,11 @@
     DropdownMenuItem,
     DropdownMenuTrigger,
   } from '@prusa/connect-ui/primitives';
+  import { onMount } from 'svelte';
 
   import type { Translate } from '../../api';
   import type { FlowStep } from '../../plate/plate-flow.svelte';
-  import type { PrintDecision } from '../../plate/printers';
+  import { canRecheckQueue, type PrintDecision } from '../../plate/printers';
 
   let {
     decision,
@@ -34,6 +35,7 @@
     canSave,
     describedBy,
     t,
+    onCheckQueue,
     onPrint,
     onSliceOnly,
     onDownload,
@@ -50,11 +52,21 @@
     /** The id of the sentence that says why the button is off. */
     describedBy?: string | undefined;
     t: Translate;
+    onCheckQueue?: ((signal: AbortSignal) => void) | undefined;
     onPrint: () => void;
     onSliceOnly: () => void;
     onDownload: () => void;
     onSaveStl: () => void;
   } = $props();
+
+  const request = new AbortController();
+  const checkQueue = (): void => {
+    onCheckQueue?.(request.signal);
+  };
+  onMount(() => {
+    checkQueue();
+    return () => request.abort();
+  });
 
   const busy = $derived(step !== 'idle');
   const label = $derived(
@@ -109,4 +121,14 @@
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+  {#if canRecheckQueue(decision.block) && onCheckQueue}
+    <Button
+      size="field"
+      variant="ghost"
+      onclick={checkQueue}
+      aria-describedby={describedBy}
+    >
+      {t('slicer.plate.retryQueue')}
+    </Button>
+  {/if}
 </div>

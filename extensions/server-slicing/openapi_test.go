@@ -153,7 +153,8 @@ func TestEveryDocumentedRouteAnswers(t *testing.T) {
 	module := newRig(t)
 
 	for _, route := range documentedRoutes(t) {
-		path := strings.NewReplacer("{id}", "0011223344556677", "{version}", "2.9.6").Replace(route.path)
+		path := strings.NewReplacer("{id}", "0011223344556677", "{version}", "2.9.6", "{device}", "mk4").
+			Replace(route.path)
 
 		response := module.call(t, routesapi.Request{Method: route.method, Path: path, Principal: root})
 

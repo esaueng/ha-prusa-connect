@@ -89,6 +89,8 @@ export const testPrepare: PrepareApi = {
   job: () => Promise.resolve(slicedJob),
   download: () => Promise.resolve(new Blob(['G28\n'])),
   print: () => Promise.resolve(),
+  checkQueue: () => Promise.resolve(undefined),
+  enqueue: () => Promise.resolve({ waiting: 2 }),
 };
 
 const START_PRINT = 'core.command.start_print';

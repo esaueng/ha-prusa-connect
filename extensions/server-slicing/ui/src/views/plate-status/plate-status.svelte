@@ -13,6 +13,7 @@
     selectedName,
     bed,
     printerName,
+    waiting,
     blocked,
     warning,
     blockedId,
@@ -24,6 +25,7 @@
     selectedName: string | undefined;
     bed: STLBed | undefined;
     printerName: string | undefined;
+    waiting?: number | undefined;
     /** Why the Print button is off, when it is. */
     blocked: string | undefined;
     /** Something to check that does not stop the print. */
@@ -49,6 +51,9 @@
     </span>
   {/if}
   <span class="@max-4xl/plate:hidden">{t('slicer.plate.keys')}</span>
+  {#if waiting !== undefined}
+    <span>{t('slicer.plate.waiting', { count: waiting })}</span>
+  {/if}
   <span
     id={blockedId}
     class="ms-auto truncate text-warning-text"

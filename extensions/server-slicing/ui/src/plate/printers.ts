@@ -108,7 +108,22 @@ export type PrintBlock =
   | 'offline'
   | 'notAllowed'
   | 'state'
-  | 'noQueue';
+  | QueueBlock;
+
+export type QueueBlock =
+  | 'queueChecking'
+  | 'queueInstall'
+  | 'queueOffline'
+  | 'queueApproval'
+  | 'queueDenied'
+  | 'queuePrinterMissing'
+  | 'queuePrinterUnknown'
+  | 'queueUnavailable';
+
+export const canRecheckQueue = (block: PrintBlock | undefined): boolean =>
+  block === 'queueUnavailable' ||
+  block === 'queuePrinterUnknown' ||
+  block === 'queueOffline';
 
 export interface PrintDecision {
   /** Print starts the file now; queue adds it to the printer's queue. */
@@ -132,20 +147,18 @@ export interface PlateReadiness {
  * that is printing, or holds a finished print on its bed, takes it into its
  * queue. Neither runs while the plate cannot be sliced.
  *
- * `queue` says whether this page can reach a print queue. The queue is the
- * Print queue module's, and this module has no approved call to it, so the
- * page passes false and the button says why.
+ * The queue check supplies a reason while the selected printer cannot queue.
  */
 export const decidePrint = (
   printer: PrinterChoice | undefined,
   plate: PlateReadiness,
-  queue: boolean,
+  queueBlock: QueueBlock | undefined,
 ): PrintDecision => {
   const action =
     printer && LATER.has(printer.state)
       ? ('queue' as const)
       : ('print' as const);
-  const block = plateBlockOf(plate) ?? printerBlockOf(printer, queue);
+  const block = plateBlockOf(plate) ?? printerBlockOf(printer, queueBlock);
   return { action, block };
 };
 
@@ -163,12 +176,12 @@ export const plateBlockOf = (plate: PlateReadiness): PrintBlock | undefined => {
 /** Why the printer cannot take the plate now, whatever the plate is. */
 export const printerBlockOf = (
   printer: PrinterChoice | undefined,
-  queue: boolean,
+  queueBlock: QueueBlock | undefined,
 ): PrintBlock | undefined => {
   if (!printer) return 'noPrinter';
   if (printer.state === 'OFFLINE') return 'offline';
   if (!printer.mayPrint) return 'notAllowed';
   if (FREE.has(printer.state)) return undefined;
-  if (LATER.has(printer.state)) return queue ? undefined : 'noQueue';
+  if (LATER.has(printer.state)) return queueBlock;
   return 'state';
 };

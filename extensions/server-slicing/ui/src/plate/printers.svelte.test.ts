@@ -62,68 +62,80 @@ describe('a printer in the picker', () => {
 
 describe('what the Print button does', () => {
   it('prints on an idle or ready printer', () => {
-    expect(decidePrint(printerChoiceOf(henry), ready, false)).toEqual({
+    expect(decidePrint(printerChoiceOf(henry), ready, 'queueInstall')).toEqual({
       action: 'print',
       block: undefined,
     });
     expect(
-      decidePrint(printerChoiceOf(printer('r', 'R', 'READY')), ready, false),
+      decidePrint(
+        printerChoiceOf(printer('r', 'R', 'READY')),
+        ready,
+        'queueInstall',
+      ),
     ).toEqual({ action: 'print', block: undefined });
   });
 
   it('queues on a printer that prints or holds a finished print', () => {
     for (const state of ['PRINTING', 'PAUSED', 'FINISHED', 'STOPPED', 'BUSY']) {
       const busy = printerChoiceOf(printer('b', 'B', state));
-      expect(decidePrint(busy, ready, true)).toEqual({
+      expect(decidePrint(busy, ready, undefined)).toEqual({
         action: 'queue',
         block: undefined,
       });
-      // This module reaches no print queue, so it says why.
-      expect(decidePrint(busy, ready, false)).toEqual({
+      // A queue refusal keeps the action disabled.
+      expect(decidePrint(busy, ready, 'queueInstall')).toEqual({
         action: 'queue',
-        block: 'noQueue',
+        block: 'queueInstall',
       });
     }
   });
 
   it('refuses a printer that is away, in error or not the person’s to use', () => {
     expect(
-      decidePrint(printerChoiceOf({ ...henry, connected: false }), ready, true)
-        .block,
+      decidePrint(
+        printerChoiceOf({ ...henry, connected: false }),
+        ready,
+        undefined,
+      ).block,
     ).toBe('offline');
     expect(
-      decidePrint(printerChoiceOf(printer('e', 'E', 'ERROR')), ready, true)
+      decidePrint(printerChoiceOf(printer('e', 'E', 'ERROR')), ready, undefined)
         .block,
     ).toBe('state');
     expect(
-      decidePrint(printerChoiceOf({ ...henry, verbs: [] }), ready, true).block,
+      decidePrint(printerChoiceOf({ ...henry, verbs: [] }), ready, undefined)
+        .block,
     ).toBe('notAllowed');
-    expect(decidePrint(undefined, ready, true).block).toBe('noPrinter');
+    expect(decidePrint(undefined, ready, undefined).block).toBe('noPrinter');
   });
 
   it('refuses a plate that cannot be sliced before it asks the printer', () => {
     const idle = printerChoiceOf(henry);
-    expect(decidePrint(idle, { ...ready, parts: 0 }, false).block).toBe(
-      'empty',
-    );
-    expect(decidePrint(idle, { ...ready, outside: 1 }, false).block).toBe(
-      'outside',
-    );
-    expect(decidePrint(idle, { ...ready, profile: false }, false).block).toBe(
-      'noProfile',
-    );
-    expect(decidePrint(idle, { ...ready, slicer: false }, false).block).toBe(
-      'noSlicer',
-    );
-    expect(decidePrint(idle, { ...ready, storage: false }, false).block).toBe(
-      'noStorage',
-    );
-    expect(decidePrint(idle, { ...ready, busy: true }, false).block).toBe(
-      'busy',
-    );
+    expect(
+      decidePrint(idle, { ...ready, parts: 0 }, 'queueInstall').block,
+    ).toBe('empty');
+    expect(
+      decidePrint(idle, { ...ready, outside: 1 }, 'queueInstall').block,
+    ).toBe('outside');
+    expect(
+      decidePrint(idle, { ...ready, profile: false }, 'queueInstall').block,
+    ).toBe('noProfile');
+    expect(
+      decidePrint(idle, { ...ready, slicer: false }, 'queueInstall').block,
+    ).toBe('noSlicer');
+    expect(
+      decidePrint(idle, { ...ready, storage: false }, 'queueInstall').block,
+    ).toBe('noStorage');
+    expect(
+      decidePrint(idle, { ...ready, busy: true }, 'queueInstall').block,
+    ).toBe('busy');
     // A plate outside the bed is the first thing said, even on a busy printer.
     expect(
-      decidePrint(printerChoiceOf(charlie), { ...ready, outside: 1 }, false),
+      decidePrint(
+        printerChoiceOf(charlie),
+        { ...ready, outside: 1 },
+        'queueInstall',
+      ),
     ).toEqual({ action: 'queue', block: 'outside' });
   });
 });

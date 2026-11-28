@@ -4,10 +4,12 @@ import {
   printFile,
   readDeviceStorages,
 } from '@prusa/connect-ui/data';
+import { describeFault } from '@prusa/connect-ui/i18n';
 import { parseFileRef, type ModuleHost } from '@prusa/connect-ui/slots';
 
-import type { Job, SlicerApi } from '../../api';
+import type { EnqueueResult, Job, SlicerApi } from '../../api';
 import type { PrintSettings } from '../../plate/print-settings';
+import type { QueueBlock } from '../../plate/printers';
 import type { SendGuard } from '../../plate/sendable';
 import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 
@@ -77,7 +79,39 @@ export interface PrepareApi {
     signal: AbortSignal,
     guard: SendGuard,
   ) => Promise<void>;
+  /** Why the caller cannot add to a printer's queue, if any. */
+  readonly checkQueue: (
+    device: string,
+    signal: AbortSignal,
+  ) => Promise<QueueBlock | undefined>;
+  /** Checks access to a printer's queue again, then adds the job if the guard passes. */
+  readonly enqueue: (
+    job: string,
+    device: string,
+    signal: AbortSignal,
+    guard: SendGuard,
+  ) => Promise<EnqueueResult>;
 }
+
+const PRINT_QUEUE = 'com.github.aux.prusa3d.simple-queue';
+
+export const queueBlockOf = (
+  code: string | undefined,
+): QueueBlock | undefined => {
+  switch (code) {
+    case 'server-slicing/PRINT_QUEUE_NOT_APPROVED':
+      return 'queueApproval';
+    case 'server-slicing/PRINT_QUEUE_DENIED':
+      return 'queueDenied';
+    case 'server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND':
+      return 'queuePrinterMissing';
+    case 'server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN':
+      return 'queuePrinterUnknown';
+    case 'server-slicing/PRINT_QUEUE_UNAVAILABLE':
+      return 'queueUnavailable';
+  }
+  return undefined;
+};
 
 const readFile = async (response: Response, name: string): Promise<File> => {
   const reader = response.body?.getReader();
@@ -102,7 +136,10 @@ const readFile = async (response: Response, name: string): Promise<File> => {
 
 export const prepareOn = (
   client: ModuleHost['client'],
-  api: Pick<SlicerApi, 'submitJob' | 'readJob'>,
+  api: Pick<
+    SlicerApi,
+    'submitJob' | 'readJob' | 'checkPrintQueue' | 'enqueueJob'
+  >,
 ): PrepareApi => ({
   async destinations(signal) {
     const page = await client.listStorages({}, signal);
@@ -185,5 +222,38 @@ export const prepareOn = (
         code: outcome.faultCode ?? COMMAND_REFUSED,
       });
     }
+  },
+  async checkQueue(device, signal) {
+    try {
+      await api.checkPrintQueue({ path: { device } }, signal);
+      return undefined;
+    } catch (error) {
+      const block = queueBlockOf(describeFault(error).code);
+      if (block !== 'queueUnavailable' || signal.aborted)
+        return block ?? 'queueUnavailable';
+
+      // The relay sees absence, a stopped process and a process that did not
+      // answer alike. The caller's resource listing can identify a stopped queue.
+      try {
+        const { items } = await client.listResources(
+          { query: { kind: 'sink' } },
+          signal,
+        );
+        const installed = items?.find((item) => item.namespace === PRINT_QUEUE);
+        if (!installed) return 'queueInstall';
+        return installed.status.serving ? 'queueUnavailable' : 'queueOffline';
+      } catch {
+        return 'queueUnavailable';
+      }
+    }
+  },
+  async enqueue(id, device, signal, guard) {
+    guard();
+    await api.checkPrintQueue({ path: { device } }, signal);
+    guard();
+    return api.enqueueJob(
+      { path: { id }, body: { device_id: device } },
+      signal,
+    );
   },
 });

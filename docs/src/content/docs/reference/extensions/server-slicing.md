@@ -20,6 +20,11 @@ The **Slicing** page opens on the build plate of a printer. Add STL and 3MF
 files, place, lay flat and arrange them, choose the print settings, and
 press **Print** to slice the plate and start it on an idle printer.
 
+On a busy printer, **Add to queue** slices the plate and adds it to Print
+queue. Install and enable [Print queue](./simple-queue.md) and approve the call
+from Server slicing in **Extensions**. Your account needs permission to
+operate Print queue and the printer and to read the sliced file.
+
 An administrator adds profiles in the Server slicing extension settings.
 Use **File → Export → Export Config** in PrusaSlicer and save the text under
 a name in `stl_profiles`.
@@ -42,7 +47,7 @@ Slices 3MF projects and STL models into G-code on this server with the PrusaSlic
 
 | | |
 |---|---|
-| version | 0.6.1 |
+| version | 0.7.1 |
 | licence | OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1 |
 | module path | `github.com/prusa3d/server-slicing` |
 | namespace | `com.github.aux.prusa3d.server-slicing` |
@@ -67,9 +72,11 @@ It connects outside Prusa Connect to:
 ## What it needs {#what-it-needs}
 
 - a server release `>=0.0.1-alpha.7`
-- the server methods `access.check`, `storage.read`, `storage.stat`, `storage.write`
+- the server methods `access.check`, `routes.call`, `storage.read`, `storage.stat`, `storage.write`
+- works better beside `com.github.aux.prusa3d.simple-queue`: Adds sliced files to a printer's queue from the Slicing page.
 - the permissions `read_storage`, `write_storage`, `configure_resource`, approved at install
 - a data directory of its own, which an update and a removal keep
+- calls to the routes of `com.github.aux.prusa3d.simple-queue`
 
 ## Settings {#settings}
 
@@ -100,6 +107,8 @@ Every path is under `/api/v1/modules/com.github.aux.prusa3d.server-slicing`. The
 | `POST /jobs/upload` | Slice a project sent as the body. |
 | `GET /jobs/{id}` | One job. |
 | `POST /jobs/{id}/cancel` | Stop one job. |
+| `POST /jobs/{id}/enqueue` | Add a finished slicing job to a printer queue. |
+| `GET /print-queue/{device}` | Check whether the caller may add to a printer queue. |
 | `GET /slicers` | The installed and the offered slicers. |
 | `PUT /slicers/default` | Choose the version a job gets. |
 | `POST /slicers/install` | Install one offered version. |
