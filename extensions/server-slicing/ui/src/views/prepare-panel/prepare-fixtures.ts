@@ -22,6 +22,19 @@ export const modelFile = (): File => {
   return file;
 };
 
+export const loadFixture = async (
+  name: string,
+  fileName = name,
+): Promise<File> => {
+  const url = new URL(`./testdata/${name}`, import.meta.url);
+  // eslint-disable-next-line no-restricted-globals -- The fixture is a bundled asset and calls no core API.
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Could not load fixture ${name}`);
+  return new File([await response.blob()], fileName);
+};
+
+export const assembledFile = (): Promise<File> => loadFixture('assembled.3mf');
+
 export const placedJob: Job = {
   id: 'placed-job',
   state: 'queued',

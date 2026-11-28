@@ -37,7 +37,7 @@ Slices 3MF projects and STL models into G-code on this server with the PrusaSlic
 
 | | |
 |---|---|
-| version | 0.4.0 |
+| version | 0.5.0 |
 | licence | OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1 |
 | module path | `github.com/prusa3d/server-slicing` |
 | namespace | `com.github.aux.prusa3d.server-slicing` |

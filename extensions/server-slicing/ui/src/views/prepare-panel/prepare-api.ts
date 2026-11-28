@@ -2,10 +2,12 @@ import { parseFileRef, type ModuleHost } from '@prusa/connect-ui/slots';
 
 import type { Job, SlicerApi } from '../../api';
 
-export const MAX_MODEL_BYTES = 20 * 1024 * 1024;
+import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 
 export const placedName = (fileName: string): string => {
-  const clean = fileName.slice(0, -4).replace(/[^\p{L}\p{N}._-]/gu, '-');
+  const clean = fileName
+    .replace(/\.[^.]+$/u, '')
+    .replace(/[^\p{L}\p{N}._-]/gu, '-');
   const stem = Array.from(clean).slice(0, 40).join('') || 'model';
   const suffix = Array.from(
     crypto.getRandomValues(new Uint8Array(16)),
@@ -47,7 +49,8 @@ const readFile = async (response: Response, name: string): Promise<File> => {
       const { value, done } = await reader.read();
       if (done) return new File(chunks, name);
       size += value.byteLength;
-      if (size > MAX_MODEL_BYTES) throw new Error('The STL is too large');
+      if (size > MAX_MODEL_BYTES)
+        throw new ModelLimitError('Model exceeds 20 MiB');
       chunks.push(Uint8Array.from(value));
     }
   } finally {
