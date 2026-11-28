@@ -445,7 +445,16 @@ export class Plate {
     );
   }
 
+  /**
+   * Records the plate for Undo before a change. A change made while a drag is
+   * open, such as R before the button is released, ends the drag: what the
+   * drag moved gets its own step first, and the release then records nothing.
+   */
   #record(): void {
+    const gesture = this.#gesture;
+    this.#gesture = undefined;
+    if (gesture && !samePlate(this.#parts, gesture.before))
+      this.#push(gesture.before);
     this.#push(this.#parts);
   }
 
