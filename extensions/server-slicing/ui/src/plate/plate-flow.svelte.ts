@@ -86,6 +86,29 @@ export const signatureOf = (
     input.storage,
   ]);
 
+/** True when `thrown`, or an error it was caused by, is `reason`. */
+const causedBy = (thrown: unknown, reason: unknown): boolean => {
+  let at: unknown = thrown;
+  for (
+    let depth = 0;
+    depth < 4 && typeof at === 'object' && at !== null;
+    depth += 1
+  ) {
+    if (at === reason || at instanceof PlateChanged) return true;
+    at = 'cause' in at ? at.cause : undefined;
+  }
+  return false;
+};
+
+/**
+ * What each step of one action waits under: the guard it calls before every
+ * request and after every wait, and the signal every request is sent with.
+ */
+interface Send {
+  readonly guard: SendGuard;
+  readonly signal: AbortSignal;
+}
+
 export class PlateFlow {
   #step = $state<FlowStep>('idle');
   #fault = $state.raw<FaultText | undefined>(undefined);
@@ -152,7 +175,7 @@ export class PlateFlow {
   /** Saves the plate as an STL in the storage and answers its path. */
   async save(input: PlateInput): Promise<string | undefined> {
     return this.#run(async () => {
-      const path = await this.#savedPath(input);
+      const path = await this.#savedPath(input, this.#pageOnly);
       this.#notice = { key: 'slicer.plate.notice.saved', params: { path } };
       return path;
     });
@@ -161,7 +184,7 @@ export class PlateFlow {
   /** Slices the plate, or answers the job of the plate as it is. */
   async slice(input: PlateInput): Promise<Job | undefined> {
     return this.#run(async () => {
-      const job = await this.#slicedJob(input);
+      const job = await this.#slicedJob(input, this.#pageOnly);
       this.#notice = {
         key: 'slicer.plate.notice.sliced',
         params: { path: job.result?.path ?? '' },
@@ -183,31 +206,37 @@ export class PlateFlow {
     printer: { id: string; name: string },
     current: () => SendSnapshot,
   ): Promise<boolean> {
-    const guard = this.#guardFor(current);
-    const ok = await this.#run(async () => {
-      const job = await this.#slicedJob(input);
-      const result = job.result;
-      if (!result) throw new Error('The job wrote no G-code');
-      guard();
-      this.#step = 'sending';
-      await this.#api.print(
-        {
-          deviceId: printer.id,
-          storage: result.storage,
-          source: result.path,
-          name: result.path.split('/').at(-1) ?? result.path,
-        },
-        this.#signal,
-        guard,
-      );
-      this.#live();
-      this.#notice = {
-        key: 'slicer.plate.notice.printing',
-        params: { printer: printer.name },
-      };
-      return true;
-    });
-    return ok === true;
+    const { send, stopped } = this.#sendFor(current);
+    try {
+      const ok = await this.#run(async () => {
+        const job = await stopped(this.#slicedJob(input, send));
+        const result = job.result;
+        if (!result) throw new Error('The job wrote no G-code');
+        send.guard();
+        this.#step = 'sending';
+        await stopped(
+          this.#api.print(
+            {
+              deviceId: printer.id,
+              storage: result.storage,
+              source: result.path,
+              name: result.path.split('/').at(-1) ?? result.path,
+            },
+            send.signal,
+            send.guard,
+          ),
+        );
+        this.#live();
+        this.#notice = {
+          key: 'slicer.plate.notice.printing',
+          params: { printer: printer.name },
+        };
+        return true;
+      });
+      return ok === true;
+    } finally {
+      send.dispose();
+    }
   }
 
   /** Slices the plate if it changed, then adds the finished job to Print queue. */
@@ -216,42 +245,43 @@ export class PlateFlow {
     printer: { id: string; name: string },
     current: () => SendSnapshot,
   ): Promise<void> {
-    const guard = this.#guardFor(current);
-    await this.#run(async () => {
-      this.#step = 'queueing';
-      const job = await this.#slicedJob(input);
-      guard();
-      this.#step = 'queueing';
-      try {
-        const { waiting } = await this.#api.enqueue(
-          job.id,
-          printer.id,
-          this.#signal,
-          guard,
-        );
-        this.#live();
-        this.#waiting = { ...this.#waiting, [printer.id]: waiting };
-        this.#notice = {
-          key: 'slicer.plate.notice.queued',
-          params: { printer: printer.name },
-        };
-      } catch (error) {
-        const block = queueBlockOf(describeFault(error).code);
-        if (
-          block !== undefined &&
-          !canRecheckQueue(block) &&
-          this.#queue?.printer === printer.id
-        )
-          this.#queue = { printer: printer.id, block };
-        throw error;
-      }
-    });
+    const { send, stopped } = this.#sendFor(current);
+    try {
+      await this.#run(async () => {
+        this.#step = 'queueing';
+        const job = await stopped(this.#slicedJob(input, send));
+        send.guard();
+        this.#step = 'queueing';
+        try {
+          const { waiting } = await stopped(
+            this.#api.enqueue(job.id, printer.id, send.signal, send.guard),
+          );
+          this.#live();
+          this.#waiting = { ...this.#waiting, [printer.id]: waiting };
+          this.#notice = {
+            key: 'slicer.plate.notice.queued',
+            params: { printer: printer.name },
+          };
+        } catch (error) {
+          const block = queueBlockOf(describeFault(error).code);
+          if (
+            block !== undefined &&
+            !canRecheckQueue(block) &&
+            this.#queue?.printer === printer.id
+          )
+            this.#queue = { printer: printer.id, block };
+          throw error;
+        }
+      });
+    } finally {
+      send.dispose();
+    }
   }
 
   /** Slices the plate if it changed and answers its G-code as a file. */
   async download(input: PlateInput): Promise<File | undefined> {
     return this.#run(async () => {
-      const job = await this.#slicedJob(input);
+      const job = await this.#slicedJob(input, this.#pageOnly);
       const result = job.result;
       if (!result) throw new Error('The job wrote no G-code');
       const blob = await this.#api.download(
@@ -268,12 +298,74 @@ export class PlateFlow {
     if (this.#signal.aborted) throw new PageClosed();
   }
 
-  #guardFor(current: () => SendSnapshot): SendGuard {
-    const pressed = current();
-    return () => {
-      this.#live();
-      if (!stillSendable(pressed, current())) throw new PlateChanged();
+  /** What an action that sends nothing to a printer waits under: the page alone. */
+  get #pageOnly(): Send {
+    return {
+      guard: () => {
+        this.#live();
+      },
+      signal: this.#signal,
     };
+  }
+
+  /**
+   * What a print or a queue entry waits under. `current` is read now, as the
+   * snapshot the button was pressed for. Until the final request goes out, the
+   * guard compares it with the page as it is, and the signal is aborted the
+   * moment they stop matching, so a request in flight is cut short and the SDK
+   * does not send it again. Once the guard passes with `'final'`, the send is
+   * committed: the watch ends, nothing aborts it, and whatever the final
+   * request answers is reported as it is. `stopped` turns an error into the
+   * change the person is told about only when this send's own abort caused it.
+   */
+  #sendFor(current: () => SendSnapshot): {
+    send: Send & { dispose: () => void };
+    stopped: <T>(step: Promise<T>) => Promise<T>;
+  } {
+    const pressed = current();
+    const stale = new AbortController();
+    const reason = new PlateChanged();
+    let committed = false;
+    let watching = true;
+    const watch = $effect.root(() => {
+      $effect(() => {
+        if (!committed && !stillSendable(pressed, current()))
+          stale.abort(reason);
+      });
+    });
+    const release = (): void => {
+      if (!watching) return;
+      watching = false;
+      watch();
+      this.#signal.removeEventListener('abort', release);
+    };
+    // A closed page reads nothing more from its snapshot.
+    this.#signal.addEventListener('abort', release, { once: true });
+    const send = {
+      signal: AbortSignal.any([this.#signal, stale.signal]),
+      guard: (step?: 'final') => {
+        this.#live();
+        if (stale.signal.aborted || !stillSendable(pressed, current())) {
+          stale.abort(reason);
+          throw new PlateChanged();
+        }
+        if (step === 'final') {
+          committed = true;
+          release();
+        }
+      },
+      dispose: release,
+    };
+    const stopped = async <T>(step: Promise<T>): Promise<T> => {
+      try {
+        return await step;
+      } catch (thrown) {
+        if (!committed && stale.signal.aborted && causedBy(thrown, reason))
+          throw new PlateChanged();
+        throw thrown;
+      }
+    };
+    return { send, stopped };
   }
 
   async #run<T>(work: () => Promise<T>): Promise<T | undefined> {
@@ -293,31 +385,31 @@ export class PlateFlow {
     }
   }
 
-  async #savedPath(input: PlateInput): Promise<string> {
+  async #savedPath(input: PlateInput, send: Send): Promise<string> {
     const saved = this.#saved;
     if (saved?.storage === input.storage && saved.meshKey === input.meshKey)
       return saved.path;
 
-    this.#live();
+    send.guard();
     this.#step = 'saving';
     const path = await this.#api.save(
       input.storage,
       placedName(input.name),
       makeSTL(input.meshes),
-      this.#signal,
+      send.signal,
     );
-    this.#live();
     this.#saved = { meshKey: input.meshKey, storage: input.storage, path };
+    send.guard();
     return path;
   }
 
-  async #slicedJob(input: PlateInput): Promise<Job> {
+  async #slicedJob(input: PlateInput, send: Send): Promise<Job> {
     const signature = signatureOf(input);
     const known = this.slicedFor(signature);
     if (known) return known;
 
-    const path = await this.#savedPath(input);
-    this.#live();
+    const path = await this.#savedPath(input, send);
+    send.guard();
     this.#step = 'slicing';
     let job = await this.#api.submit(
       {
@@ -326,13 +418,14 @@ export class PlateFlow {
         profile: input.profile,
         settings: input.settings,
       },
-      this.#signal,
+      send.signal,
     );
-    this.#live();
+    send.guard();
     while (!ENDED.has(job.state)) {
-      await pause(this.#pollMs, this.#signal);
-      job = await this.#api.job(job.id, this.#signal);
-      this.#live();
+      await pause(this.#pollMs, send.signal);
+      send.guard();
+      job = await this.#api.job(job.id, send.signal);
+      send.guard();
     }
     if (job.state !== 'done') {
       // describeFault reads the code and the server's message off what is thrown.

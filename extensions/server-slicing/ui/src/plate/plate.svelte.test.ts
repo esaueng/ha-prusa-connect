@@ -532,6 +532,62 @@ describe('a change that changes nothing', () => {
   });
 });
 
+describe('a drag back to where it began', () => {
+  it('records no Undo step', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    plate.press(part.id, false);
+    plate.beginMove();
+    plate.moveBy(30, 10);
+    plate.moveBy(0, 0);
+    plate.endMove();
+    expect([plate.parts[0]?.x, plate.parts[0]?.y]).toEqual([100, 100]);
+
+    // Undo holds the adding and nothing after it.
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(plate.canUndo).toBe(false);
+    plate.dispose();
+  });
+});
+
+describe('R while the button is still down', () => {
+  it('records the turn once, and the release nothing', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    plate.press(part.id, false);
+    plate.beginMove();
+    plate.rotate();
+    plate.endMove();
+
+    plate.undo();
+    expect(plate.parts[0]?.size.halfX).toBeCloseTo(5);
+    // The step before the turn is the adding, and nothing else.
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(plate.canUndo).toBe(false);
+    plate.dispose();
+  });
+
+  it('keeps a move made before the turn as a step of its own', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    plate.press(part.id, false);
+    plate.beginMove();
+    plate.moveBy(20, 0);
+    plate.rotate();
+    plate.moveBy(40, 0);
+    plate.endMove();
+    expect(plate.parts[0]?.x).toBe(120);
+
+    plate.undo();
+    expect([plate.parts[0]?.x, plate.parts[0]?.size.halfX]).toEqual([120, 5]);
+    plate.undo();
+    expect(plate.parts[0]?.x).toBe(100);
+    plate.dispose();
+  });
+});
+
 describe('Undo during a drag', () => {
   it('ends the drag, so the part Undo removed does not come back', () => {
     const plate = plateOf();

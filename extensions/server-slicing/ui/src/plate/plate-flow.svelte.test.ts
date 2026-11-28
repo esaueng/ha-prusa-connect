@@ -1,5 +1,8 @@
 import { BoxGeometry, Matrix4 } from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { PrusaConnect } from '@prusa/connect';
+import { flushSync } from 'svelte';
+import { bind } from 'server-slicing-client';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Job } from '../api';
@@ -8,7 +11,7 @@ import {
   slicedJob,
   testPrepare,
 } from '../views/prepare-panel/prepare-fixtures';
-import type { PrepareApi } from '../views/prepare-panel/prepare-api';
+import { type PrepareApi, prepareOn } from '../views/prepare-panel/prepare-api';
 import { PlateFlow, type PlateInput, signatureOf } from './plate-flow.svelte';
 import { type SendSnapshot } from './sendable';
 
@@ -188,7 +191,9 @@ describe('slicing and printing the plate', () => {
       await expect(
         flow.print(inputOf(), henryPrinter, changingTo(pressed, now)),
       ).resolves.toBe(false);
-      expect(api.submit).toHaveBeenCalledTimes(1);
+      // The change is seen before the plate is even uploaded.
+      expect(api.save).not.toHaveBeenCalled();
+      expect(api.submit).not.toHaveBeenCalled();
       expect(api.print).not.toHaveBeenCalled();
       expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
       expect(flow.step).toBe('idle');
@@ -273,6 +278,149 @@ describe('slicing and printing the plate', () => {
   });
 });
 
+describe('a print that goes stale before the slice is done', () => {
+  const pressed = (): SendSnapshot => ({
+    plate: signatureOf(inputOf()),
+    printer: 'henry',
+    state: 'IDLE',
+    action: 'print',
+    sendable: true,
+  });
+
+  /** A promise and the function that settles it, for a request held open. */
+  const held = <T>() => {
+    let settle: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  };
+
+  it('creates no job when the printer changes while the plate is uploaded', async () => {
+    const upload = held<string>();
+    const api = recording({ save: () => upload.promise });
+    let now = pressed();
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+    const printed = flow.print(inputOf(), henryPrinter, () => now);
+    await vi.waitFor(() => {
+      expect(api.save).toHaveBeenCalled();
+    });
+
+    now = { ...now, printer: 'xl' };
+    upload.settle('bracket-placed.stl');
+    await expect(printed).resolves.toBe(false);
+    expect(api.submit).not.toHaveBeenCalled();
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+  });
+
+  it('reads no job when the printer changes while the job is created', async () => {
+    const created = held<Job>();
+    const api = recording({ submit: () => created.promise });
+    let now = pressed();
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+    const printed = flow.print(inputOf(), henryPrinter, () => now);
+    await vi.waitFor(() => {
+      expect(api.submit).toHaveBeenCalled();
+    });
+
+    now = { ...now, printer: 'xl' };
+    created.settle(placedJob);
+    await expect(printed).resolves.toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(api.job).not.toHaveBeenCalled();
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The SDK itself, on a fetch that fails the first request `failing` sends
+   * and makes the plate stale while the SDK waits to retry it, so only a
+   * stale signal stops the SDK's own retry.
+   */
+  const transportThatFails = (
+    failing: (url: string, method: string) => boolean,
+    stale: () => void,
+  ) => {
+    const sent: string[] = [];
+    const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      const method = init?.method ?? 'GET';
+      sent.push(`${method} ${url}`);
+      if (failing(url, method)) {
+        // The plate goes stale while the SDK waits to send it again.
+        setTimeout(stale, 10);
+        return Promise.reject(new TypeError('the connection dropped'));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ path: 'bracket-placed.stl' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+    const client = new PrusaConnect({
+      auth: { kind: 'session' },
+      fetch,
+      retryDelay: 50,
+    });
+    return { client, sent };
+  };
+
+  it('does not let the SDK send the upload again once the plate is stale', async () => {
+    let now = $state(pressed());
+    const { client, sent } = transportThatFails(
+      (_url, method) => method === 'PUT',
+      () => {
+        now = { ...now, printer: 'xl' };
+      },
+    );
+    const api: PrepareApi = {
+      ...recording(),
+      save: prepareOn(client, {
+        submitJob: () => Promise.resolve(placedJob),
+        readJob: () => Promise.resolve(slicedJob),
+        checkPrintQueue: () => Promise.reject(new Error('no queue here')),
+        enqueueJob: () => Promise.reject(new Error('no queue here')),
+      }).save,
+    };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await expect(flow.print(inputOf(), henryPrinter, () => now)).resolves.toBe(
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent.filter((line) => line.startsWith('PUT '))).toHaveLength(1);
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+  });
+
+  it('does not let the SDK read the printer’s storages again once the plate is stale', async () => {
+    let now = $state(pressed());
+    const { client, sent } = transportThatFails(
+      (url) => url.includes('/devices/henry/storages'),
+      () => {
+        now = { ...now, sendable: false };
+      },
+    );
+    const api: PrepareApi = {
+      ...recording(),
+      print: prepareOn(client, {
+        submitJob: () => Promise.resolve(placedJob),
+        readJob: () => Promise.resolve(slicedJob),
+        checkPrintQueue: () => Promise.reject(new Error('no queue here')),
+        enqueueJob: () => Promise.reject(new Error('no queue here')),
+      }).print,
+    };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await expect(flow.print(inputOf(), henryPrinter, () => now)).resolves.toBe(
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent.filter((line) => line.includes('/storages'))).toHaveLength(1);
+    expect(sent.filter((line) => line.startsWith('POST '))).toHaveLength(0);
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+  });
+});
+
 describe('adding the plate to a printer queue', () => {
   const printer = { id: 'charlie', name: 'Charlie' };
   const pressed: SendSnapshot = {
@@ -331,5 +479,143 @@ describe('adding the plate to a printer queue', () => {
     expect(api.enqueue).not.toHaveBeenCalled();
     expect(flow.notice).toBeUndefined();
     expect(flow.fault).toBeUndefined();
+  });
+});
+
+describe('once the final request is sent', () => {
+  const usb = {
+    reported: true,
+    items: [
+      {
+        name: 'usb',
+        mountpoint: '/usb',
+        read_only: false,
+        type: 'USB',
+        free_space: 1,
+      },
+    ],
+  };
+  const json = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  /** The SDK over a fetch the test answers, with this module's routes bound. */
+  const sdk = (
+    answer: (
+      url: string,
+      method: string,
+      signal?: AbortSignal | null,
+    ) => Promise<Response>,
+  ) => {
+    const sent: string[] = [];
+    const client = new PrusaConnect({
+      auth: { kind: 'session' },
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        const method = init?.method ?? 'GET';
+        sent.push(`${method} ${url}`);
+        return answer(url, method, init?.signal);
+      },
+      retryDelay: 10,
+    });
+    return { client, sent, api: prepareOn(client, bind(client)) };
+  };
+
+  it('reports a queue entry the server added, though the printer finished meanwhile', async () => {
+    let now = $state<SendSnapshot>({
+      plate: signatureOf(inputOf()),
+      printer: 'charlie',
+      state: 'PRINTING',
+      action: 'queue',
+      sendable: true,
+    });
+    const { api: service, sent } = sdk((url, method, signal) => {
+      if (method === 'GET' && url.includes('/print-queue/'))
+        return Promise.resolve(new Response(null, { status: 204 }));
+      // The printer finishes while the server answers the entry it added.
+      now = { ...now, state: 'FINISHED', action: 'print' };
+      return new Promise((resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error('aborted'),
+          );
+        });
+        setTimeout(() => {
+          resolve(json({ waiting: 2 }, 201));
+        }, 30);
+      });
+    });
+    const api: PrepareApi = { ...recording(), enqueue: service.enqueue };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await flow.enqueue(
+      inputOf(),
+      { id: 'charlie', name: 'Charlie' },
+      () => now,
+    );
+    expect(sent.filter((line) => line.startsWith('POST '))).toHaveLength(1);
+    expect(flow.fault).toBeUndefined();
+    expect(flow.notice?.key).toBe('slicer.plate.notice.queued');
+  });
+
+  it('reports a real failure of the print request as itself', async () => {
+    let now = $state<SendSnapshot>({
+      plate: signatureOf(inputOf()),
+      printer: 'henry',
+      state: 'IDLE',
+      action: 'print',
+      sendable: true,
+    });
+    const { api: service } = sdk((url, method) => {
+      if (url.includes('/storages')) return Promise.resolve(json(usb));
+      // The printer starts printing as the request goes out, and then the
+      // connection drops before its answer.
+      now = { ...now, state: 'PRINTING', action: 'queue' };
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => {
+          reject(new TypeError(`${method} lost: connection reset`));
+        }, 20);
+      });
+    });
+    const api: PrepareApi = { ...recording(), print: service.print };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await expect(flow.print(inputOf(), henryPrinter, () => now)).resolves.toBe(
+      false,
+    );
+    expect(flow.notice).toBeUndefined();
+    expect(flow.fault?.title).toMatch(/connection reset/u);
+  });
+
+  it('stops reading the closed page once it closes', async () => {
+    let now = $state<SendSnapshot>({
+      plate: signatureOf(inputOf()),
+      printer: 'henry',
+      state: 'IDLE',
+      action: 'print',
+      sendable: true,
+    });
+    const controller = new AbortController();
+    const api = recording({ submit: () => new Promise<Job>(() => undefined) });
+    let reads = 0;
+    const flow = new PlateFlow(api, controller.signal, 1);
+    void flow.print(inputOf(), henryPrinter, () => {
+      reads += 1;
+      return now;
+    });
+    await vi.waitFor(() => {
+      expect(api.submit).toHaveBeenCalled();
+    });
+
+    controller.abort();
+    const before = reads;
+    now = { ...now, state: 'BUSY' };
+    flushSync();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(reads).toBe(before);
   });
 });

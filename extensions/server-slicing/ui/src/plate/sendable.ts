@@ -61,5 +61,10 @@ export class PageClosed extends Error {
  * What a service that sends the plate calls after each of its waits, right
  * before its next request. It throws when the page closed or the plate may no
  * longer be sent, so nothing further goes out.
+ *
+ * The service passes `'final'` right before the request that starts the print
+ * or adds the queue entry. Once that call passes, the send is committed: that
+ * request goes out without a signal that could cut it short, and its answer,
+ * success or failure, is reported as the server gave it.
  */
-export type SendGuard = () => void;
+export type SendGuard = (step?: 'final') => void;

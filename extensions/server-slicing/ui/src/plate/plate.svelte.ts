@@ -89,7 +89,7 @@ export class Plate {
       )
       .map((part) => part.id);
   });
-  #gesture: { before: readonly Part[]; moved: boolean } | undefined;
+  #gesture: { before: readonly Part[] } | undefined;
   #revision = $state(0);
   #next = 1;
   /** Every mesh the plate took, so dispose frees one that only Undo held. */
@@ -264,14 +264,13 @@ export class Plate {
 
   /** Starts a drag of the selection. Undo takes the whole drag back in one step. */
   beginMove(): void {
-    this.#gesture = { before: this.#parts, moved: false };
+    this.#gesture = { before: this.#parts };
   }
 
   /** Moves the selection by an offset from where the drag began. */
   moveBy(dx: number, dy: number): void {
     const gesture = this.#gesture;
     if (!gesture || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    gesture.moved = gesture.moved || dx !== 0 || dy !== 0;
     this.#setParts(
       gesture.before.map((part) =>
         this.#selected.includes(part.id)
@@ -284,7 +283,9 @@ export class Plate {
   endMove(): void {
     const gesture = this.#gesture;
     this.#gesture = undefined;
-    if (gesture?.moved) this.#push(gesture.before);
+    // A drag that ends where it began changes nothing, whatever it passed.
+    if (gesture && !samePlate(this.#parts, gesture.before))
+      this.#push(gesture.before);
   }
 
   /** The scale every selected part shares, or undefined when they differ. */
@@ -444,7 +445,16 @@ export class Plate {
     );
   }
 
+  /**
+   * Records the plate for Undo before a change. A change made while a drag is
+   * open, such as R before the button is released, ends the drag: what the
+   * drag moved gets its own step first, and the release then records nothing.
+   */
   #record(): void {
+    const gesture = this.#gesture;
+    this.#gesture = undefined;
+    if (gesture && !samePlate(this.#parts, gesture.before))
+      this.#push(gesture.before);
     this.#push(this.#parts);
   }
 

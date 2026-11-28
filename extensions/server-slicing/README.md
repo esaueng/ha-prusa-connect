@@ -147,8 +147,9 @@ button shows the print time from the G-code. A change to the plate or to the
 settings slices it again. The plate, its settings, the printer and its bed
 may change while the plate is sliced. If the printer changes state or any
 part of the plate changes or stops fitting, the plate stays on the page and
-shows a message. The same check runs just before a print starts or a queue
-entry is added. Closing the page stops a send that has yet to start.
+shows a message. The same check runs before each request of the send, from
+the upload to the start of a print or a queue entry. A request it stops is
+not sent again. Closing the page stops a send that has yet to start.
 
 A printer that is printing, or that still holds a
 finished print, shows **Add to queue** instead. Install and enable the Print
