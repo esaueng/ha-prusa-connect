@@ -1,0 +1,9 @@
+solid sample
+  facet normal 0 0 1
+    outer loop
+      vertex 1 2 0
+      vertex 5 2 0
+      vertex 1 8 4
+    endloop
+  endfacet
+endsolid sample

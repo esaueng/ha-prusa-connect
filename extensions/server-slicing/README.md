@@ -93,14 +93,21 @@ installed to run STL jobs with these profiles.
 
 Open **Slicing → Prepare**, or choose **Open in slicer** on an STL in Storage.
 Pick a saved profile with a rectangular bed. The build plate uses that
-profile's dimensions in millimetres. Use the placement controls to move,
-rotate or scale the model. The browser puts the model's lowest point on
-the bed.
+profile's dimensions in millimetres. Open or drop one STL or 3MF file. The
+browser puts a new STL in the centre of the bed. It opens a 3MF in the
+positions stored in the file and combines its objects into one model.
+The placement controls move, rotate and scale the whole model. Reset
+placement centres it and puts its lowest point on the bed.
 
 **Save and slice** writes the placed STL and its G-code to the selected
 storage. The saved STL has a unique name and keeps its position when opened
-again in Prepare.
-The editor takes one STL up to 20 MiB and 300,000 triangles.
+again in Prepare. Slicing uses the selected profile. 3MF project settings,
+colours, material assignments, support and seam painting, and plate
+definitions are dropped. Export one plate at a time if the project has
+several plates.
+
+The editor takes files up to 20 MiB and 300,000 triangles after placing
+all copies. A 3MF archive can expand to 64 MiB.
 
 A slicer uses a lot of memory, so the module asks the host for 2560 MiB
 (`needs.memory_mib` in `module.yaml`). The operator overrides that figure per instance as `memory_mib` on the resource spec (ADR-20261027-5m4).

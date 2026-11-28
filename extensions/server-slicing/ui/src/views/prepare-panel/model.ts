@@ -8,15 +8,12 @@ import {
   type BufferGeometry,
 } from 'three';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
 import type { STLBed } from '../../api';
-import { MAX_MODEL_BYTES } from './prepare-api';
+import { PLACED_HEADER } from './import-limits';
+import { combineParts, readMeshFile } from './mesh-import';
 
-const MAX_TRIANGLES = 300_000;
-const MAX_COORDINATE_MM = 1_000_000;
 const RADIANS = Math.PI / 180;
-const PLACED_HEADER = new TextEncoder().encode('Prusa Connect Prepare');
 
 export interface Orientation {
   rx: number;
@@ -28,35 +25,33 @@ export interface Orientation {
 export const upright: Orientation = { rx: 0, ry: 0, rz: 0, scale: 100 };
 
 export const readModel = async (
-  file: Blob,
+  file: File,
 ): Promise<{
   geometry: BufferGeometry;
   placedAt: [number, number] | undefined;
+  floor: number;
 }> => {
-  if (file.size < 15 || file.size > MAX_MODEL_BYTES)
-    throw new Error('STL size');
-  const data = await file.arrayBuffer();
-  const geometry = new STLLoader().parse(data);
-  const vertices = geometry.getAttribute('position');
-  const valid =
-    vertices.count >= 3 &&
-    vertices.count % 3 === 0 &&
-    vertices.count / 3 <= MAX_TRIANGLES &&
-    vertices.array.every((n) => Math.abs(n) <= MAX_COORDINATE_MM);
-  if (!valid) {
-    geometry.dispose();
-    throw new Error('STL vertices');
+  const { parts, preservePlacement } = await readMeshFile(file);
+  const imported = new Set(parts.map(({ geometry }) => geometry));
+  let geometry: BufferGeometry | undefined;
+  try {
+    geometry = combineParts(parts);
+    let placedAt: [number, number] | undefined;
+    let floor = 0;
+    if (preservePlacement) {
+      geometry.computeBoundingBox();
+      const bounds = geometry.boundingBox;
+      if (bounds) {
+        const center = bounds.getCenter(new Vector3());
+        placedAt = [center.x, center.y];
+        floor = bounds.min.z;
+      }
+    }
+    geometry.center();
+    return { geometry, placedAt, floor };
+  } finally {
+    for (const part of imported) if (part !== geometry) part.dispose();
   }
-
-  const bytes = new Uint8Array(data);
-  let placedAt: [number, number] | undefined;
-  if (PLACED_HEADER.every((value, index) => bytes[index] === value)) {
-    geometry.computeBoundingBox();
-    const center = geometry.boundingBox?.getCenter(new Vector3());
-    if (center) placedAt = [center.x, center.y];
-  }
-  geometry.center();
-  return { geometry, placedAt };
 };
 
 export const bedCenter = (bed: STLBed): [number, number] => [
@@ -64,10 +59,11 @@ export const bedCenter = (bed: STLBed): [number, number] => [
   (bed.min_y + bed.max_y) / 2,
 ];
 
-/** Uses the rotated vertices to put the model on Z=0 and center its XY bounds. */
+/** Places the rotated model at the requested Z and centers its XY bounds. */
 export const orientedModel = (
   geometry: BufferGeometry,
   { rx, ry, rz, scale }: Orientation,
+  floor = 0,
 ): { matrix: Matrix4; bounds: Box3 } => {
   const matrix = new Matrix4()
     .makeRotationFromEuler(new Euler(rx * RADIANS, ry * RADIANS, rz * RADIANS))
@@ -81,8 +77,9 @@ export const orientedModel = (
   }
 
   const center = bounds.getCenter(point);
-  matrix.setPosition(-center.x, -center.y, -bounds.min.z);
-  bounds.translate(point.set(-center.x, -center.y, -bounds.min.z));
+  const offset = point.set(-center.x, -center.y, floor - bounds.min.z);
+  matrix.setPosition(offset);
+  bounds.translate(offset);
   return { matrix, bounds };
 };
 
@@ -95,6 +92,7 @@ export const fits = (
   x + bounds.max.x <= bed.max_x &&
   y + bounds.min.y >= bed.min_y &&
   y + bounds.max.y <= bed.max_y &&
+  bounds.min.z >= 0 &&
   bounds.max.z <= bed.height &&
   bounds.max.z > 0;
 

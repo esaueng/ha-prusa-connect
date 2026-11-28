@@ -4,6 +4,12 @@ What changed in this module, newest first. The top heading is the version
 `module.yaml` declares and the version this process reports to the host, and
 `changelog_test.go` fails when the three differ.
 
+## 0.5.0 - 2026-11-28
+
+### Added
+
+- Open a 3MF in Prepare and move, rotate or scale its objects together. Prepare keeps their positions from the file and slices them with the selected profile.
+
 ## 0.4.0 - 2026-11-24
 
 ### Added

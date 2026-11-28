@@ -17,6 +17,7 @@
   import type { BufferGeometry, Matrix4 } from 'three';
 
   import type { Job, STLBed, Translate } from '../../api';
+  import { ModelLimitError } from './import-limits';
   import {
     bedCenter,
     fits,
@@ -59,6 +60,7 @@
   let fileName = $state('');
   let orientation = $state<Orientation>({ ...upright });
   let position = $state<[number, number]>();
+  let floor = $state(0);
   let modelFault = $state('');
   let actionFault = $state<FaultText>();
   let loading = $state(false);
@@ -89,7 +91,7 @@
   const xy: [number, number] = $derived(
     position ?? (bed ? bedCenter(bed) : [0, 0]),
   );
-  const oriented = $derived(mesh && orientedModel(mesh, orientation));
+  const oriented = $derived(mesh && orientedModel(mesh, orientation, floor));
   const placement = $derived(oriented && placedMatrix(oriented.matrix, xy));
   const onBed = $derived(
     Boolean(bed && oriented && fits(oriented.bounds, xy, bed)),
@@ -118,9 +120,8 @@
     try {
       const loaded = await file;
       reading = false;
-      if (!loaded.name.toLowerCase().endsWith('.stl'))
-        throw new Error('STL name');
-      const { geometry, placedAt } = await readModel(loaded);
+      const model = await readModel(loaded);
+      const { geometry, placedAt } = model;
       if (controller.signal.aborted || loadingVersion !== version) {
         geometry.dispose();
         return;
@@ -132,13 +133,15 @@
       savedPath = '';
       reset();
       position = placedAt;
-    } catch {
-      if (!controller.signal.aborted && loadingVersion === version)
-        modelFault = t(
-          reading
-            ? 'slicer.prepare.storageReadFailed'
-            : 'slicer.prepare.badModel',
-        );
+      floor = model.floor;
+    } catch (error) {
+      if (!controller.signal.aborted && loadingVersion === version) {
+        let key = reading
+          ? 'slicer.prepare.storageReadFailed'
+          : 'slicer.prepare.badModel';
+        if (error instanceof ModelLimitError) key = 'slicer.prepare.modelLimit';
+        modelFault = t(key);
+      }
     } finally {
       if (loadingVersion === version) loading = false;
     }
@@ -146,6 +149,7 @@
 
   const reset = (): void => {
     position = undefined;
+    floor = 0;
     orientation = { ...upright };
   };
 
@@ -321,7 +325,7 @@
       <Input
         id="{id}-model"
         type="file"
-        accept=".stl"
+        accept=".stl,.3mf"
         class="hidden"
         onchange={pick}
       />
