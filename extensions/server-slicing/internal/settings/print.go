@@ -130,9 +130,10 @@ func formatNumber(value float64) string {
 // ProfileSettings is what a saved profile prints with before a person changes
 // anything, so a page shows the real starting values.
 type ProfileSettings struct {
+	PrintSettings
+
 	// FilamentType is the material of the profile's first extruder, such as PETG.
 	FilamentType string `json:"filament_type,omitempty"`
-	PrintSettings
 }
 
 // PrepareSettings reads the starting settings of each checked profile. A

@@ -9,21 +9,19 @@ import (
 	"github.com/prusa3d/server-slicing/internal/settings"
 )
 
-func pointer[T any](value T) *T { return &value }
-
 func TestPrintSettingsRefuseWhatTheSlicerWouldRefuse(t *testing.T) {
 	t.Parallel()
 
 	for name, bad := range map[string]settings.PrintSettings{
-		"a layer too thin":   {LayerHeightMM: pointer(0.01)},
-		"a layer too thick":  {LayerHeightMM: pointer(0.8)},
-		"a layer of NaN":     {LayerHeightMM: pointer(math.NaN())},
-		"negative infill":    {InfillPercent: pointer(-1)},
-		"infill over 100":    {InfillPercent: pointer(101)},
-		"no walls":           {Walls: pointer(0)},
-		"too many walls":     {Walls: pointer(21)},
-		"a negative brim":    {BrimWidthMM: pointer(-1.0)},
-		"a brim too wide":    {BrimWidthMM: pointer(51.0)},
+		"a layer too thin":   {LayerHeightMM: new(0.01)},
+		"a layer too thick":  {LayerHeightMM: new(0.8)},
+		"a layer of NaN":     {LayerHeightMM: new(math.NaN())},
+		"negative infill":    {InfillPercent: new(-1)},
+		"infill over 100":    {InfillPercent: new(101)},
+		"no walls":           {Walls: new(0)},
+		"too many walls":     {Walls: new(21)},
+		"a negative brim":    {BrimWidthMM: new(-1.0)},
+		"a brim too wide":    {BrimWidthMM: new(51.0)},
 		"an unknown support": {Supports: "trees"},
 	} {
 		if err := bad.Check(); !errors.Is(err, settings.ErrInvalid) {
@@ -32,8 +30,8 @@ func TestPrintSettingsRefuseWhatTheSlicerWouldRefuse(t *testing.T) {
 	}
 
 	good := settings.PrintSettings{
-		LayerHeightMM: pointer(0.2), InfillPercent: pointer(0), Walls: pointer(20),
-		Supports: settings.SupportsBuildPlate, BrimWidthMM: pointer(0.0),
+		LayerHeightMM: new(0.2), InfillPercent: new(0), Walls: new(20),
+		Supports: settings.SupportsBuildPlate, BrimWidthMM: new(0.0),
 	}
 	if err := good.Check(); err != nil {
 		t.Fatalf("Check refused settings within the bounds: %v", err)
@@ -50,8 +48,8 @@ func TestPrintSettingsReplaceTheProfilesKeysAndAddTheMissingOnes(t *testing.T) {
 		"support_material = 0\nbrim_width = 0\nbrim_type = no_brim\nfilament_type = PETG\n"
 
 	got := settings.PrintSettings{
-		LayerHeightMM: pointer(0.28), InfillPercent: pointer(15), Walls: pointer(3),
-		Supports: settings.SupportsEverywhere, BrimWidthMM: pointer(5.0),
+		LayerHeightMM: new(0.28), InfillPercent: new(15), Walls: new(3),
+		Supports: settings.SupportsEverywhere, BrimWidthMM: new(5.0),
 	}.Apply(profile)
 
 	want := "layer_height = 0.28\nfill_density = 15%\nperimeters = 3\n" +
@@ -65,7 +63,7 @@ func TestPrintSettingsReplaceTheProfilesKeysAndAddTheMissingOnes(t *testing.T) {
 		t.Fatalf("settings that change nothing rewrote the profile into\n%s", unchanged)
 	}
 
-	noBrim := settings.PrintSettings{BrimWidthMM: pointer(0.0), Supports: settings.SupportsOff}.Apply(profile)
+	noBrim := settings.PrintSettings{BrimWidthMM: new(0.0), Supports: settings.SupportsOff}.Apply(profile)
 	if noBrim != "layer_height = 0.15\nfill_density = 20%\nperimeters = 2\n"+
 		"support_material = 0\nbrim_width = 0\nbrim_type = no_brim\nfilament_type = PETG\n"+
 		"support_material_buildplate_only = 0\n" {
@@ -83,8 +81,8 @@ func TestPrepareSettingsReadsWhatEachProfilePrintsWith(t *testing.T) {
 	})
 	want := map[string]settings.ProfileSettings{
 		"petg": {FilamentType: "PETG", PrintSettings: settings.PrintSettings{
-			LayerHeightMM: pointer(0.2), InfillPercent: pointer(15), Walls: pointer(2),
-			Supports: settings.SupportsBuildPlate, BrimWidthMM: pointer(0.0),
+			LayerHeightMM: new(0.2), InfillPercent: new(15), Walls: new(2),
+			Supports: settings.SupportsBuildPlate, BrimWidthMM: new(0.0),
 		}},
 		"bare": {FilamentType: "PLA"},
 	}
