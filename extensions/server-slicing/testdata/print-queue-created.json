@@ -1,0 +1,56 @@
+{
+  "device_id": "printer-1",
+  "entries": [
+    {
+      "size": 1024,
+      "id": "0000000000000001",
+      "storage": "local",
+      "path": "parts/bracket.bgcode",
+      "name": "bracket.bgcode",
+      "added_by": "user:alice",
+      "added_at": "2026-11-28T00:00:00Z",
+      "state": "sending",
+      "changed_at": "2026-11-28T00:00:00Z",
+      "started_by": "user:alice",
+      "landing": "usb/bracket.bgcode",
+      "attempts": 1
+    },
+    {
+      "size": 1024,
+      "id": "0000000000000002",
+      "storage": "local",
+      "path": "parts/bracket.bgcode",
+      "name": "bracket.bgcode",
+      "added_by": "user:alice",
+      "added_at": "2026-11-28T00:00:00Z",
+      "state": "waiting",
+      "changed_at": "2026-11-28T00:00:00Z"
+    },
+    {
+      "size": 1024,
+      "id": "0000000000000003",
+      "storage": "local",
+      "path": "parts/bracket.bgcode",
+      "name": "bracket.bgcode",
+      "added_by": "user:alice",
+      "added_at": "2026-11-28T00:00:00Z",
+      "state": "waiting",
+      "changed_at": "2026-11-28T00:00:00Z"
+    }
+  ],
+  "printer": {
+    "name": "MK4",
+    "model": "MK4S",
+    "state": "PRINTING",
+    "connected": true,
+    "can_be_ready": true,
+    "free": false,
+    "ready": false
+  },
+  "starts_alone": false,
+  "may_change": true,
+  "limits": {
+    "max_waiting": 3,
+    "keep_history": 5
+  }
+}

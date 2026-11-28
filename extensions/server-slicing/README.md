@@ -145,15 +145,21 @@ one.
 the G-code to an idle printer, which starts it. Once the plate is sliced, the
 button shows the print time from the G-code. A change to the plate or to the
 settings slices it again. The plate, its settings, the printer and its bed
-may change while the plate is sliced. When any of them did, the printer
-started another print, or a part no longer fits, nothing is sent and the plate
-says so. The same check runs again right before the print starts. Nothing is sent after the
-page is closed. A printer that is printing, or that still holds a
-finished print, shows **Add to queue** instead. That button is off for now:
-the queue belongs to the Print queue module, and this module has no approved
-call to it. The menu beside the button slices without printing, downloads
-the G-code, or saves the placed STL. A saved STL keeps its position when it
-is opened again.
+may change while the plate is sliced. If the printer changes state or any
+part of the plate changes or stops fitting, the plate stays on the page and
+shows a message. The same check runs just before a print starts or a queue
+entry is added. Closing the page stops a send that has yet to start.
+
+A printer that is printing, or that still holds a
+finished print, shows **Add to queue** instead. Install and enable the Print
+queue module and approve the call from Server slicing to use this button.
+Your account needs permission to operate Print queue and the printer and to
+read the storage that holds the G-code. Slicing checks queue access again
+before adding the file. After the file is added, Slicing shows how many
+prints are waiting.
+
+The menu beside the button slices without printing, downloads the G-code,
+or saves the placed STL. A saved STL keeps its position when it is opened again.
 
 Slicing uses the selected profile. 3MF project settings, colours, material
 assignments, support and seam painting, and plate definitions are dropped.
@@ -315,6 +321,15 @@ takes `operate_resource`, which a token with the `operate` scope reaches.
 | `POST /jobs/upload` | operate | slice a project sent as the body, at most 1 MiB |
 | `GET /jobs/{id}` | read | one job |
 | `POST /jobs/{id}/cancel` | operate | stop one job |
+| `POST /jobs/{id}/enqueue` | operate | add the caller's finished job to a printer's queue |
+| `GET /print-queue/{device}` | read | check whether the caller may add to a printer's queue |
+
+Send `{"device_id":"mk4"}` to `POST /jobs/{id}/enqueue`. The job must belong
+to the caller and have a finished print file. Slicing sends the file's storage
+and path to Print queue as the caller. A successful response has status `201`
+and includes the waiting count when available. The availability
+check returns `204` when the caller may add a file. Queue space and access to
+the file are checked when it is added.
 
 The four slicer routes download and run a program on the server, so the
 module also asks the server whether the caller may configure modules,
@@ -469,10 +484,19 @@ The module asks for a data directory and for three permissions it uses as
 itself: `read_storage`, `write_storage` and `configure_resource`.
 
 ```console
-prusa-connect module add github.com/prusa3d/server-slicing@0.2.0 -from <release> -approve
+prusa-connect module add github.com/prusa3d/server-slicing@0.7.0 -from <release> -approve
 ```
 
 `-approve` grants the data directory and the permissions the manifest lists. That is the viewer role, which reaches `read_storage`, and `write_storage` on the storage kind, so the module writes G-code as itself. The Extensions page asks for the same approval. The operator writes no grant of their own.
 
 The module uses `configure_resource` only to ask whether a person may change
 the installed slicers. It needs no grant for it.
+
+To enable **Add to queue**, approve the request shown under **Extensions**.
+
+> May call the routes of the module com.github.aux.prusa3d.simple-queue.
+
+The host grants calls by module namespace. Server slicing uses this grant
+only for `POST /printers/{device}/entries` and makes each call as the person
+using Slicing. Print queue is optional. Slicing and direct printing work
+without it.

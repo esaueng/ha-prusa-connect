@@ -177,7 +177,7 @@ its fields and lets a person try them. Print queue links to it from its page.
 ## Installing it
 
 ```console
-prusa-connect module add github.com/prusa3d/simple-queue@0.1.0 -from <release> -approve
+prusa-connect module add github.com/prusa3d/simple-queue@0.1.1 -from <release> -approve
 ```
 
 The module asks for three permissions it uses as itself:

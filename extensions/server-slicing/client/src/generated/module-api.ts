@@ -88,6 +88,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/modules/com.github.aux.prusa3d.server-slicing/jobs/{id}/enqueue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a finished slicing job to a printer queue
+         * @description Adds the file written by the caller’s finished job to the Print queue module. The operator must approve the call. Print queue checks access to its module, the printer and the file as the caller.
+         */
+        post: operations["enqueue-job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/modules/com.github.aux.prusa3d.server-slicing/print-queue/{device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check whether the caller may add to a printer queue
+         * @description Checks the approved module call and the caller’s permission to add files for the printer. This creates no entry. Queue space and access to the file are checked when adding it.
+         */
+        get: operations["check-print-queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/modules/com.github.aux.prusa3d.server-slicing/slicers": {
         parameters: {
             query?: never;
@@ -617,7 +657,7 @@ export interface components {
              * @description The module's own code. It is outside the core's registry, so it starts with the module's short name.
              * @enum {string}
              */
-            code: "server-slicing/ACCESS_UNKNOWN" | "server-slicing/BODY_TOO_LARGE" | "server-slicing/INVALID" | "server-slicing/JOB_FINISHED" | "server-slicing/JOB_NOT_FOUND" | "server-slicing/NOT_ADMINISTRATOR" | "server-slicing/NOT_A_PROJECT" | "server-slicing/NOT_READY" | "server-slicing/NO_DATA_DIRECTORY" | "server-slicing/NO_PRINCIPAL" | "server-slicing/NO_SLICER" | "server-slicing/OUTPUT_DENIED" | "server-slicing/QUEUE_FULL" | "server-slicing/REFRESH_TOO_SOON" | "server-slicing/SOURCE_DENIED" | "server-slicing/SOURCE_NOT_FOUND" | "server-slicing/SOURCE_TOO_LARGE" | "server-slicing/STORE_FAILED" | "server-slicing/UNVERIFIED" | "server-slicing/VERSION_BUSY" | "server-slicing/VERSION_NOT_INSTALLED" | "server-slicing/VERSION_NOT_OFFERED";
+            code: "server-slicing/ACCESS_UNKNOWN" | "server-slicing/BODY_TOO_LARGE" | "server-slicing/INVALID" | "server-slicing/JOB_FINISHED" | "server-slicing/JOB_NOT_FOUND" | "server-slicing/NOT_ADMINISTRATOR" | "server-slicing/NOT_A_PROJECT" | "server-slicing/NOT_READY" | "server-slicing/NO_DATA_DIRECTORY" | "server-slicing/NO_PRINCIPAL" | "server-slicing/NO_SLICER" | "server-slicing/OUTPUT_DENIED" | "server-slicing/QUEUE_FULL" | "server-slicing/REFRESH_TOO_SOON" | "server-slicing/SOURCE_DENIED" | "server-slicing/SOURCE_NOT_FOUND" | "server-slicing/SOURCE_TOO_LARGE" | "server-slicing/STORE_FAILED" | "server-slicing/UNVERIFIED" | "server-slicing/VERSION_BUSY" | "server-slicing/VERSION_NOT_INSTALLED" | "server-slicing/VERSION_NOT_OFFERED" | "server-slicing/JOB_NOT_PRINTABLE" | "server-slicing/PRINT_QUEUE_UNAVAILABLE" | "server-slicing/PRINT_QUEUE_NOT_APPROVED" | "server-slicing/PRINT_QUEUE_DENIED" | "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND" | "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN" | "server-slicing/PRINT_QUEUE_FULL" | "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND" | "server-slicing/PRINT_QUEUE_FAILED";
             /** @description What went wrong, in one English phrase that never varies. */
             title: string;
             /** @description What went wrong this time. */
@@ -657,6 +697,14 @@ export interface components {
         ProfileSettings: components["schemas"]["PrintSettings"] & {
             /** @description The material of the profile's first extruder, such as PETG. */
             filament_type?: string;
+        };
+        EnqueueBody: {
+            /** @description The printer ID. */
+            device_id: string;
+        };
+        EnqueueResult: {
+            /** @description The number of waiting entries when Print queue returns its updated queue. */
+            waiting?: number;
         };
     };
     responses: never;
@@ -1023,6 +1071,160 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+        };
+    };
+    "enqueue-job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnqueueBody"];
+            };
+        };
+        responses: {
+            /** @description Print queue accepted the file. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnqueueResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+        };
+    };
+    "check-print-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller can send requests to add files to this queue. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Refusal"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

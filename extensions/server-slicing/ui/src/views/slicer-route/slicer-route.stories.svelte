@@ -23,6 +23,8 @@
     cancelJob: () => Promise.reject(new Error('the story cancels nothing')),
     submitJob: () => Promise.reject(new Error('the story slices nothing')),
     readJob: () => Promise.reject(new Error('the story slices nothing')),
+    checkPrintQueue: () => Promise.resolve(undefined),
+    enqueueJob: () => Promise.resolve({}),
   };
 
   // The route reads t, signal, store, fleet, client and pageHref of the host

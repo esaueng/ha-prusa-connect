@@ -4,6 +4,14 @@ What changed in this module, newest first. The top heading is the version
 `module.yaml` declares and the version this process reports to the host, and
 `changelog_test.go` fails when the three differ.
 
+## 0.7.0 - 2026-11-28
+
+### Added
+
+- Add a sliced plate to a busy printer's queue. Install the Print queue module and approve the call from Server slicing to use it.
+- If the Print queue cannot be reached, retry the check from the Slicing page.
+- Slicing checks queue access and the plate again before adding a print, including when you try again after a failure.
+
 ## 0.6.0 - 2026-11-28
 
 ### Changed

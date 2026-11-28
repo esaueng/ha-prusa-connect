@@ -1,18 +1,17 @@
 // Whether the G-code sliced for a plate may still go to the printer.
 //
-// Slicing, reading the printer's storages and sending each take a while, and
-// the person can change the plate, its settings, the printer or the bed in the
-// meantime, or the printer can start another print. The page takes a snapshot
-// when Print is pressed. Every step that waits checks the snapshot against the
-// page as it is now with `stillSendable`, right before it sends anything:
-// the flow once the slice is done, and the printer service after each request
-// before it starts the print or adds it to a queue.
+// The page takes a snapshot when Print or Add to queue is pressed. The flow
+// checks it after slicing, and the service checks it after its lookups, before
+// starting a print or adding an entry to the queue.
+
+import type { PrinterState } from '@prusa/connect-ui/domain';
 
 /** The plate and the printer as one send depends on them. */
 export interface SendSnapshot {
   /** The plate's revision, profile, settings, storage and bed, as one text. */
   readonly plate: string;
   readonly printer: string | undefined;
+  readonly state: PrinterState | undefined;
   /** What the Print button does with this printer now. */
   readonly action: 'print' | 'queue';
   /** The printer takes the plate now, and every part fits its bed. */
@@ -31,6 +30,7 @@ export const stillSendable = (
   now.sendable &&
   now.plate === pressed.plate &&
   now.printer === pressed.printer &&
+  now.state === pressed.state &&
   now.action === pressed.action;
 
 /** Thrown where a send stops because the plate or the printer changed. */

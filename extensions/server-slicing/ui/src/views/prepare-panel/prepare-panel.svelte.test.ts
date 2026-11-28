@@ -1,4 +1,8 @@
-import { formatDuration } from '@prusa/connect-ui/i18n';
+import {
+  formatDuration,
+  locale,
+  registerCatalogue,
+} from '@prusa/connect-ui/i18n';
 import { BoxGeometry, Matrix4 } from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { page, userEvent } from 'vitest/browser';
@@ -6,7 +10,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import type { ModuleHost } from '@prusa/connect-ui/slots';
 
+import czech from '../../locales/cs.json';
 import { t } from '../../test/fakes';
+import type { QueueBlock } from '../../plate/printers';
 import { makeSTL } from './model';
 import type { Job } from '../../api';
 import { type PrepareApi, prepareOn } from './prepare-api';
@@ -35,6 +41,8 @@ const recording = (more: Partial<PrepareApi> = {}) => ({
   job: vi.fn(more.job ?? testPrepare.job),
   download: vi.fn(more.download ?? testPrepare.download),
   print: vi.fn(more.print ?? testPrepare.print),
+  checkQueue: vi.fn(more.checkQueue ?? testPrepare.checkQueue),
+  enqueue: vi.fn(more.enqueue ?? testPrepare.enqueue),
 });
 
 const xlBed = { min_x: 0, min_y: 0, max_x: 360, max_y: 360, height: 360 };
@@ -100,21 +108,154 @@ describe('the build-plate workspace', () => {
       .toMatchTextContent(formatDuration(12_300));
   });
 
-  it('turns Print into Add to queue for a busy printer and says why it is off', async () => {
+  it.each([
+    ['queueChecking', 'Checking the Print queue.'],
+    ['queueInstall', 'Install the Print queue module.'],
+    ['queueOffline', 'Start the Print queue module.'],
+    ['queueApproval', 'Approve the queue permission for Slicing.'],
+    ['queueDenied', 'You may not add prints to this queue.'],
+    ['queuePrinterMissing', 'Print queue cannot find this printer.'],
+    ['queuePrinterUnknown', 'Print queue could not read this printer.'],
+    ['queueUnavailable', 'Print queue is unavailable.'],
+  ] satisfies readonly (readonly [QueueBlock, string])[])(
+    'keeps Add to queue disabled and explains %s',
+    async (block, reason) => {
+      const remember = memory();
+      remember.write('plate.printer', 'charlie');
+      const api = recording({
+        checkQueue: () =>
+          block === 'queueChecking'
+            ? new Promise(() => undefined)
+            : Promise.resolve(block),
+      });
+      await page.viewport(1440, 900);
+      await render(PreparePanel, { props: props(api, { remember }) });
+
+      await expect.element(status()).toMatchTextContent('1 part');
+      const queue = page.getByRole('button', { name: 'Add to queue' });
+      await expect.element(queue).toBeDisabled();
+      await expect.element(status()).toMatchTextContent(reason);
+      await expect.element(queue).toHaveAccessibleDescription(reason);
+      expect(api.checkQueue).toHaveBeenCalledWith(
+        'charlie',
+        expect.any(AbortSignal),
+      );
+      expect(api.enqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it('slices for a busy printer and refreshes its waiting count when the job is added', async () => {
     const remember = memory();
     remember.write('plate.printer', 'charlie');
-    const api = recording();
+    const api = recording({ submit: () => Promise.resolve(slicedJob) });
     await page.viewport(1440, 900);
     await render(PreparePanel, { props: props(api, { remember }) });
 
-    await expect.element(status()).toMatchTextContent('1 part');
+    const queue = page.getByRole('button', { name: /Add to queue/u });
+    await expect.element(queue).toBeEnabled();
+    expect(api.enqueue).not.toHaveBeenCalled();
+    await queue.click();
+    await expect
+      .element(
+        page.getByText('Added to the queue for Charlie', { exact: true }),
+      )
+      .toBeVisible();
+    await expect.element(status()).toMatchTextContent('2 prints waiting');
+    expect(api.enqueue).toHaveBeenCalledExactlyOnceWith(
+      slicedJob.id,
+      'charlie',
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(api.print).not.toHaveBeenCalled();
+
+    api.enqueue.mockResolvedValueOnce({ waiting: 3 });
+    await queue.click();
+    await expect
+      .element(
+        page.getByText('Added to the queue for Charlie', { exact: true }),
+      )
+      .toBeVisible();
+    await expect.element(status()).toMatchTextContent('3 prints waiting');
+    expect(api.submit).toHaveBeenCalledTimes(1);
+
+    await page.getByTestId('printer-picker').click();
+    await page.getByRole('menuitemradio', { name: /Henry/u }).click();
+    await expect.element(status()).not.toMatchTextContent('3 prints waiting');
+  });
+
+  it('rechecks a queue that was unavailable without changing the selected printer', async () => {
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording();
+    api.checkQueue.mockResolvedValueOnce('queueUnavailable');
+    await render(PreparePanel, { props: props(api, { remember }) });
+
     const queue = page.getByRole('button', { name: 'Add to queue' });
     await expect.element(queue).toBeDisabled();
-    const reason =
-      'The printer is busy. Adding to its queue needs the Print queue module, and this module cannot reach it.';
-    await expect.element(status()).toMatchTextContent(reason);
-    await expect.element(queue).toHaveAccessibleDescription(reason);
-    expect(api.print).not.toHaveBeenCalled();
+    await page.getByRole('button', { name: 'Retry queue check' }).click();
+    await expect.element(queue).toBeEnabled();
+    expect(api.checkQueue).toHaveBeenCalledTimes(2);
+    expect(api.checkQueue).toHaveBeenLastCalledWith(
+      'charlie',
+      expect.any(AbortSignal),
+    );
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'server-slicing/PRINT_QUEUE_UNAVAILABLE',
+    'server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN',
+  ])('allows another enqueue after a transient %s refusal', async (code) => {
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording({ submit: () => Promise.resolve(slicedJob) });
+    api.enqueue.mockRejectedValueOnce(
+      Object.assign(new Error('Try again'), { code, retryable: true }),
+    );
+    await render(PreparePanel, { props: props(api, { remember }) });
+
+    const queue = page.getByRole('button', { name: /Add to queue/u });
+    await expect.element(queue).toBeEnabled();
+    await queue.click();
+    await expect.element(page.getByText(code, { exact: true })).toBeVisible();
+    await expect.element(queue).toBeEnabled();
+    await queue.click();
+
+    await expect.element(status()).toMatchTextContent('2 prints waiting');
+    expect(api.enqueue).toHaveBeenCalledTimes(2);
+    expect(api.submit).toHaveBeenCalledOnce();
+  });
+
+  it('shows a queue refusal in the current language', async () => {
+    registerCatalogue('com.github.aux.prusa3d.server-slicing', 'cs', czech);
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording({
+      submit: () => Promise.resolve(slicedJob),
+      enqueue: () =>
+        Promise.reject(
+          Object.assign(new Error('the queue of this printer is full'), {
+            code: 'server-slicing/PRINT_QUEUE_FULL',
+          }),
+        ),
+    });
+    locale.set('cs');
+    try {
+      await render(PreparePanel, { props: props(api, { remember }) });
+      const queue = page.getByRole('button', {
+        name: 'Přidat do fronty',
+        exact: true,
+      });
+      await expect.element(queue).toBeEnabled();
+      await queue.click();
+      await expect
+        .element(page.getByText('Fronta této tiskárny je plná'))
+        .toBeVisible();
+      expect(api.print).not.toHaveBeenCalled();
+    } finally {
+      locale.set('en');
+    }
   });
 
   it('resizes the bed to the printer chosen and keeps the choice', async () => {
@@ -503,6 +644,118 @@ describe('what the re-check found', () => {
 });
 
 describe('what the second re-check found', () => {
+  it('cannot add to the queue if the printer becomes idle during the first availability check', async () => {
+    let finish: () => void = () => undefined;
+    const api = recording({
+      checkQueue: () =>
+        new Promise<undefined>((resolve) => {
+          finish = () => {
+            resolve(undefined);
+          };
+        }),
+    });
+    const remember = memory();
+    remember.write('plate.printer', charlie.id);
+    const screen = await render(PreparePanel, {
+      props: props(api, { remember }),
+    });
+    const queue = page.getByRole('button', { name: 'Add to queue' });
+    await expect.element(queue).toBeDisabled();
+    await expect.poll(() => api.checkQueue.mock.calls.length).toBe(1);
+
+    await screen.rerender({
+      devices: [
+        henry,
+        { ...charlie, state: { ...charlie.state, '/state': 'IDLE' } },
+        xl,
+      ],
+    });
+    finish();
+
+    await expect
+      .element(page.getByRole('button', { name: 'Print', exact: true }))
+      .toBeEnabled();
+    await expect.element(queue).not.toBeInTheDocument();
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'while enqueueing',
+      false,
+      {
+        ...charlie,
+        state: { ...charlie.state, '/state': 'PAUSED' },
+      },
+    ],
+    [
+      'while retrying enqueue',
+      true,
+      {
+        ...charlie,
+        build_volume: { x_mm: 240, y_mm: 210, z_mm: 220 },
+      },
+    ],
+  ] as const)(
+    'adds nothing from a changed printer %s',
+    async (_, retry, changed) => {
+      let finish: () => void = () => undefined;
+      const pending = new Promise<undefined>((resolve) => {
+        finish = () => {
+          resolve(undefined);
+        };
+      });
+      const checkPrintQueue = vi.fn(() => Promise.resolve(undefined));
+      const enqueueJob = vi.fn(() => Promise.resolve({ waiting: 1 }));
+      const client = {} as ModuleHost['client'];
+      const api: PrepareApi = {
+        ...prepareOn(client, {
+          submitJob: () => Promise.resolve(slicedJob),
+          readJob: () => Promise.resolve(slicedJob),
+          checkPrintQueue,
+          enqueueJob,
+        }),
+        destinations: testPrepare.destinations,
+        read: testPrepare.read,
+        save: testPrepare.save,
+      };
+      const remember = memory();
+      remember.write('plate.printer', charlie.id);
+      const screen = await render(PreparePanel, {
+        props: props(api, { remember }),
+      });
+      const queue = page.getByRole('button', { name: /Add to queue/u });
+      await expect.element(queue).toBeEnabled();
+
+      if (retry) {
+        const code = 'server-slicing/PRINT_QUEUE_UNAVAILABLE';
+        enqueueJob.mockRejectedValueOnce(
+          Object.assign(new Error('Try again'), { code }),
+        );
+        await queue.click();
+        await expect
+          .element(page.getByText(code, { exact: true }))
+          .toBeVisible();
+        await expect.element(queue).toBeEnabled();
+        expect(enqueueJob).toHaveBeenCalledOnce();
+      }
+
+      checkPrintQueue.mockReturnValueOnce(pending);
+      await queue.click();
+      await expect
+        .poll(() => checkPrintQueue.mock.calls.length)
+        .toBe(retry ? 3 : 2);
+      await screen.rerender({ devices: [henry, changed, xl] });
+      finish();
+
+      await expect
+        .element(page.getByText(/The plate changed while it was sliced/u))
+        .toBeVisible();
+      expect(enqueueJob).toHaveBeenCalledTimes(retry ? 1 : 0);
+      await expect.element(status()).not.toMatchTextContent(/waiting/u);
+    },
+  );
+
   it('starts nothing when the bed shrinks while the printer’s storages are read', async () => {
     let storages: (page: unknown) => void = () => undefined;
     const printDeviceFile = vi.fn(() =>
@@ -525,6 +778,8 @@ describe('what the second re-check found', () => {
         {
           submitJob: () => Promise.resolve(placedJob),
           readJob: () => Promise.resolve(slicedJob),
+          checkPrintQueue: () => Promise.resolve(undefined),
+          enqueueJob: () => Promise.reject(new Error('printing queues no job')),
         },
       ),
       destinations: testPrepare.destinations,

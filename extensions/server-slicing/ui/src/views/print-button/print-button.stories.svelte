@@ -29,8 +29,12 @@
 <Story name="Slicing" args={{ step: 'slicing' }} />
 <Story name="Sending" args={{ step: 'sending', estimate: 12_300 }} />
 <Story
-  name="Queue unavailable"
-  args={{ decision: { action: 'queue', block: 'noQueue' } }}
+  name="Add to queue"
+  args={{ decision: { action: 'queue', block: undefined } }}
+/>
+<Story
+  name="Adding to queue"
+  args={{ step: 'queueing', decision: { action: 'queue', block: 'busy' } }}
 />
 <Story
   name="Nothing to print"

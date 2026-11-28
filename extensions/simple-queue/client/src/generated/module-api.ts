@@ -35,7 +35,7 @@ export interface paths {
         put?: never;
         /**
          * Put a file on the queue
-         * @description Puts a print file at the end of the queue, or at the position the body names. The file is in one of this server's storages, which takes read_storage, or already on the printer when the body names no storage. It must be a print file. When the printer is ready and prints nothing from the queue, the file starts at once, as the caller. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module then asks the server whether the caller may print on the printer.
+         * @description Puts a print file at the end of the queue, or at the position the body names. The file is in one of this server's storages, which takes read_storage, or already on the printer when the body names no storage. It must be a print file. When the printer is ready and prints nothing from the queue, the file starts at once, as the caller. The host takes operate_resource on the module's instance before this is called, which a credential with the operate scope reaches. The module checks whether the caller may print on the printer before validating the request body.
          */
         post: operations["add-entry"];
         delete?: never;

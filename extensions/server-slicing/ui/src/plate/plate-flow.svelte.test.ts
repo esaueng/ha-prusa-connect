@@ -40,6 +40,7 @@ const henryPrinter = { id: 'henry', name: 'Henry' };
 const unchangedFor = (input: PlateInput) => (): SendSnapshot => ({
   plate: signatureOf(input),
   printer: 'henry',
+  state: 'IDLE',
   action: 'print',
   sendable: true,
 });
@@ -59,6 +60,8 @@ const recording = (more: Partial<PrepareApi> = {}) => ({
   job: vi.fn(more.job ?? testPrepare.job),
   download: vi.fn(more.download ?? testPrepare.download),
   print: vi.fn(more.print ?? testPrepare.print),
+  checkQueue: vi.fn(more.checkQueue ?? testPrepare.checkQueue),
+  enqueue: vi.fn(more.enqueue ?? testPrepare.enqueue),
 });
 
 describe('slicing and printing the plate', () => {
@@ -168,6 +171,7 @@ describe('slicing and printing the plate', () => {
     const pressed: SendSnapshot = {
       plate: signatureOf(inputOf()),
       printer: 'henry',
+      state: 'IDLE',
       action: 'print',
       sendable: true,
     };
@@ -265,6 +269,67 @@ describe('slicing and printing the plate', () => {
     });
     controller.abort();
     await expect(sliced).resolves.toBeUndefined();
+    expect(flow.fault).toBeUndefined();
+  });
+});
+
+describe('adding the plate to a printer queue', () => {
+  const printer = { id: 'charlie', name: 'Charlie' };
+  const pressed: SendSnapshot = {
+    plate: signatureOf(inputOf()),
+    printer: printer.id,
+    state: 'PRINTING',
+    action: 'queue',
+    sendable: true,
+  };
+
+  it('does not enqueue if the plate, settings, printer, or its bed changed during slicing', async () => {
+    for (const changed of [
+      { ...pressed, plate: signatureOf(inputOf(60)) },
+      { ...pressed, plate: signatureOf(inputOf(50, { walls: 4 })) },
+      { ...pressed, printer: 'xl' },
+      { ...pressed, plate: `${pressed.plate}/new-bed` },
+      { ...pressed, sendable: false },
+    ]) {
+      let finish: (job: Job) => void = () => undefined;
+      const finished = new Promise<Job>((resolve) => {
+        finish = resolve;
+      });
+      const api = recording({ submit: () => finished });
+      const flow = new PlateFlow(api, new AbortController().signal, 1);
+      let current = pressed;
+      const queued = flow.enqueue(inputOf(), printer, () => current);
+      await vi.waitFor(() => {
+        expect(api.submit).toHaveBeenCalledOnce();
+      });
+      current = changed;
+      finish(slicedJob);
+      await queued;
+
+      expect(api.enqueue).not.toHaveBeenCalled();
+      expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+      expect(flow.step).toBe('idle');
+    }
+  });
+
+  it('does not enqueue when the workspace closes during slicing', async () => {
+    const controller = new AbortController();
+    let finish: (job: Job) => void = () => undefined;
+    const finished = new Promise<Job>((resolve) => {
+      finish = resolve;
+    });
+    const api = recording({ submit: () => finished });
+    const flow = new PlateFlow(api, controller.signal, 1);
+    const queued = flow.enqueue(inputOf(), printer, () => pressed);
+    await vi.waitFor(() => {
+      expect(api.submit).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    finish(slicedJob);
+    await queued;
+
+    expect(api.enqueue).not.toHaveBeenCalled();
+    expect(flow.notice).toBeUndefined();
     expect(flow.fault).toBeUndefined();
   });
 });

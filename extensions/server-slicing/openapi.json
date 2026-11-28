@@ -2058,6 +2058,531 @@
           "server-slicing/STORE_FAILED"
         ]
       }
+    },
+    "/jobs/{id}/enqueue": {
+      "post": {
+        "operationId": "enqueue-job",
+        "summary": "Add a finished slicing job to a printer queue",
+        "description": "Adds the file written by the caller’s finished job to the Print queue module. The operator must approve the call. Print queue checks access to its module, the printer and the file as the caller.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnqueueBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Print queue accepted the file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnqueueResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/INVALID": {
+                    "summary": "the module did not accept what was sent",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 400,
+                      "code": "server-slicing/INVALID",
+                      "title": "the module did not accept what was sent",
+                      "detail": "the module did not accept what was sent",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_NOT_APPROVED": {
+                    "summary": "the operator must approve the Print queue permission for Slicing",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/PRINT_QUEUE_NOT_APPROVED",
+                      "title": "the operator must approve the Print queue permission for Slicing",
+                      "detail": "the operator must approve the Print queue permission for Slicing",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_DENIED": {
+                    "summary": "you may not add prints to this queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/PRINT_QUEUE_DENIED",
+                      "title": "you may not add prints to this queue",
+                      "detail": "you may not add prints to this queue",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND": {
+                    "summary": "the Print queue cannot find this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND",
+                      "title": "the Print queue cannot find this printer",
+                      "detail": "the Print queue cannot find this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/JOB_NOT_FOUND": {
+                    "summary": "there is no such job",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "server-slicing/JOB_NOT_FOUND",
+                      "title": "there is no such job",
+                      "detail": "there is no such job",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND": {
+                    "summary": "the sliced file is no longer in storage",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND",
+                      "title": "the sliced file is no longer in storage",
+                      "detail": "the sliced file is no longer in storage",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/JOB_NOT_PRINTABLE": {
+                    "summary": "the slicing job has no finished print file",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "server-slicing/JOB_NOT_PRINTABLE",
+                      "title": "the slicing job has no finished print file",
+                      "detail": "the slicing job has no finished print file",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_FULL": {
+                    "summary": "the queue of this printer is full",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 409,
+                      "code": "server-slicing/PRINT_QUEUE_FULL",
+                      "title": "the queue of this printer is full",
+                      "detail": "the queue of this printer is full",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request Entity Too Large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/BODY_TOO_LARGE": {
+                    "summary": "the request body is larger than this module reads",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 413,
+                      "code": "server-slicing/BODY_TOO_LARGE",
+                      "title": "the request body is larger than this module reads",
+                      "detail": "the request body is larger than this module reads",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/PRINT_QUEUE_FAILED": {
+                    "summary": "the Print queue did not confirm the request",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 502,
+                      "code": "server-slicing/PRINT_QUEUE_FAILED",
+                      "title": "the Print queue did not confirm the request",
+                      "detail": "the Print queue did not confirm the request",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_UNAVAILABLE": {
+                    "summary": "the Print queue module is not running",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/PRINT_QUEUE_UNAVAILABLE",
+                      "title": "the Print queue module is not running",
+                      "detail": "the Print queue module is not running",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN": {
+                    "summary": "the Print queue could not read this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+                      "title": "the Print queue could not read this printer",
+                      "detail": "the Print queue could not read this printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "server-slicing/NO_DATA_DIRECTORY": {
+                    "summary": "the module was granted no data directory, so it cannot slice",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/NO_DATA_DIRECTORY",
+                      "title": "the module was granted no data directory, so it cannot slice",
+                      "detail": "the module was granted no data directory, so it cannot slice",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "operate",
+        "x-codes": [
+          "server-slicing/INVALID",
+          "server-slicing/NO_PRINCIPAL",
+          "server-slicing/NOT_READY",
+          "server-slicing/PRINT_QUEUE_UNAVAILABLE",
+          "server-slicing/PRINT_QUEUE_NOT_APPROVED",
+          "server-slicing/PRINT_QUEUE_DENIED",
+          "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND",
+          "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+          "server-slicing/PRINT_QUEUE_FAILED",
+          "server-slicing/NO_DATA_DIRECTORY",
+          "server-slicing/BODY_TOO_LARGE",
+          "server-slicing/JOB_NOT_FOUND",
+          "server-slicing/JOB_NOT_PRINTABLE",
+          "server-slicing/PRINT_QUEUE_FULL",
+          "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND"
+        ]
+      }
+    },
+    "/print-queue/{device}": {
+      "get": {
+        "operationId": "check-print-queue",
+        "summary": "Check whether the caller may add to a printer queue",
+        "description": "Checks the approved module call and the caller’s permission to add files for the printer. This creates no entry. Queue space and access to the file are checked when adding it.",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The caller can send requests to add files to this queue."
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/INVALID": {
+                    "summary": "the module did not accept what was sent",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 400,
+                      "code": "server-slicing/INVALID",
+                      "title": "the module did not accept what was sent",
+                      "detail": "the module did not accept what was sent",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/NO_PRINCIPAL": {
+                    "summary": "the request carries no signed-in person",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/NO_PRINCIPAL",
+                      "title": "the request carries no signed-in person",
+                      "detail": "the request carries no signed-in person",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_NOT_APPROVED": {
+                    "summary": "the operator must approve the Print queue permission for Slicing",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/PRINT_QUEUE_NOT_APPROVED",
+                      "title": "the operator must approve the Print queue permission for Slicing",
+                      "detail": "the operator must approve the Print queue permission for Slicing",
+                      "params": {},
+                      "retryable": false
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_DENIED": {
+                    "summary": "you may not add prints to this queue",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 403,
+                      "code": "server-slicing/PRINT_QUEUE_DENIED",
+                      "title": "you may not add prints to this queue",
+                      "detail": "you may not add prints to this queue",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND": {
+                    "summary": "the Print queue cannot find this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 404,
+                      "code": "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND",
+                      "title": "the Print queue cannot find this printer",
+                      "detail": "the Print queue cannot find this printer",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/PRINT_QUEUE_FAILED": {
+                    "summary": "the Print queue did not confirm the request",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 502,
+                      "code": "server-slicing/PRINT_QUEUE_FAILED",
+                      "title": "the Print queue did not confirm the request",
+                      "detail": "the Print queue did not confirm the request",
+                      "params": {},
+                      "retryable": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                },
+                "examples": {
+                  "server-slicing/NOT_READY": {
+                    "summary": "the module is still starting",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/NOT_READY",
+                      "title": "the module is still starting",
+                      "detail": "the module is still starting",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_UNAVAILABLE": {
+                    "summary": "the Print queue module is not running",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/PRINT_QUEUE_UNAVAILABLE",
+                      "title": "the Print queue module is not running",
+                      "detail": "the Print queue module is not running",
+                      "params": {},
+                      "retryable": true
+                    }
+                  },
+                  "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN": {
+                    "summary": "the Print queue could not read this printer",
+                    "value": {
+                      "type": "about:blank",
+                      "status": 503,
+                      "code": "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+                      "title": "the Print queue could not read this printer",
+                      "detail": "the Print queue could not read this printer",
+                      "params": {},
+                      "retryable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope": "read",
+        "x-codes": [
+          "server-slicing/INVALID",
+          "server-slicing/NO_PRINCIPAL",
+          "server-slicing/NOT_READY",
+          "server-slicing/PRINT_QUEUE_UNAVAILABLE",
+          "server-slicing/PRINT_QUEUE_NOT_APPROVED",
+          "server-slicing/PRINT_QUEUE_DENIED",
+          "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND",
+          "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+          "server-slicing/PRINT_QUEUE_FAILED"
+        ]
+      }
     }
   },
   "components": {
@@ -3025,7 +3550,16 @@
               "server-slicing/UNVERIFIED",
               "server-slicing/VERSION_BUSY",
               "server-slicing/VERSION_NOT_INSTALLED",
-              "server-slicing/VERSION_NOT_OFFERED"
+              "server-slicing/VERSION_NOT_OFFERED",
+              "server-slicing/JOB_NOT_PRINTABLE",
+              "server-slicing/PRINT_QUEUE_UNAVAILABLE",
+              "server-slicing/PRINT_QUEUE_NOT_APPROVED",
+              "server-slicing/PRINT_QUEUE_DENIED",
+              "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND",
+              "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+              "server-slicing/PRINT_QUEUE_FULL",
+              "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND",
+              "server-slicing/PRINT_QUEUE_FAILED"
             ]
           },
           "title": {
@@ -3139,6 +3673,30 @@
             }
           }
         ]
+      },
+      "EnqueueBody": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device_id"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+            "description": "The printer ID."
+          }
+        }
+      },
+      "EnqueueResult": {
+        "type": "object",
+        "properties": {
+          "waiting": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The number of waiting entries when Print queue returns its updated queue."
+          }
+        }
       }
     },
     "securitySchemes": {
