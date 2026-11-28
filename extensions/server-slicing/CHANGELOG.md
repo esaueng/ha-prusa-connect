@@ -8,7 +8,7 @@ What changed in this module, newest first. The top heading is the version
 
 ### Added
 
-- Add a STEP file (`.step` or `.stp`) to the build plate. The browser converts its solids to a mesh in millimetres, with a mesh tolerance you can change, and the bodies of an assembly become one part. **Open in slicer** on a STEP file in Storage opens it there.
+- Add a STEP file (`.step` or `.stp`) to the build plate, or open one from Storage with **Open in slicer**. The browser meshes its solids in millimetres at a tolerance you can change, as one part.
 
 ## 0.7.0 - 2026-11-28
 
