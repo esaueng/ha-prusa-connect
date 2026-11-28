@@ -29,6 +29,11 @@
       devices: [henry, charlie, xl],
       remember: memory(),
       hasSlicer: true,
+      links: [
+        { href: '?tab=slicers', label: 'Slicers' },
+        { href: '?tab=jobs', label: 'Jobs' },
+        { href: '?tab=api', label: 'API' },
+      ],
       t,
     },
   });
