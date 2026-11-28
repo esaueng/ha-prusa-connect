@@ -163,7 +163,10 @@ class ThreeMFReader {
         throw new ModelLimitError('3MF has too many XML elements');
     }
     const doc = new DOMParser().parseFromString(text, 'application/xml');
+    // Chromium and Firefox put their XML errors in different namespaces.
     if (
+      doc.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'parsererror')
+        .length ||
       doc.getElementsByTagNameNS(
         'http://www.mozilla.org/newlayout/xml/parsererror.xml',
         'parsererror',
