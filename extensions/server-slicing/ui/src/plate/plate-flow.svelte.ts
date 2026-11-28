@@ -84,6 +84,15 @@ export const signatureOf = (
     input.storage,
   ]);
 
+/**
+ * What each step of one action waits under: the guard it calls before every
+ * request and after every wait, and the signal every request is sent with.
+ */
+interface Send {
+  readonly guard: SendGuard;
+  readonly signal: AbortSignal;
+}
+
 export class PlateFlow {
   #step = $state<FlowStep>('idle');
   #fault = $state.raw<FaultText | undefined>(undefined);
@@ -130,7 +139,7 @@ export class PlateFlow {
   /** Saves the plate as an STL in the storage and answers its path. */
   async save(input: PlateInput): Promise<string | undefined> {
     return this.#run(async () => {
-      const path = await this.#savedPath(input);
+      const path = await this.#savedPath(input, this.#pageOnly);
       this.#notice = { key: 'slicer.plate.notice.saved', params: { path } };
       return path;
     });
@@ -139,7 +148,7 @@ export class PlateFlow {
   /** Slices the plate, or answers the job of the plate as it is. */
   async slice(input: PlateInput): Promise<Job | undefined> {
     return this.#run(async () => {
-      const job = await this.#slicedJob(input);
+      const job = await this.#slicedJob(input, this.#pageOnly);
       this.#notice = {
         key: 'slicer.plate.notice.sliced',
         params: { path: job.result?.path ?? '' },
@@ -162,40 +171,67 @@ export class PlateFlow {
     current: () => SendSnapshot,
   ): Promise<boolean> {
     const pressed = current();
-    const guard: SendGuard = () => {
-      this.#live();
-      if (!stillSendable(pressed, current())) throw new PlateChanged();
+    // Aborted the moment the plate stops being sendable. Every request of the
+    // print is sent with it, so one in flight is cut short and the SDK does
+    // not send it again, which its own retries would otherwise do.
+    const stale = new AbortController();
+    const send: Send = {
+      signal: AbortSignal.any([this.#signal, stale.signal]),
+      guard: () => {
+        this.#live();
+        if (stale.signal.aborted || !stillSendable(pressed, current())) {
+          stale.abort();
+          throw new PlateChanged();
+        }
+      },
     };
-    const ok = await this.#run(async () => {
-      const job = await this.#slicedJob(input);
-      const result = job.result;
-      if (!result) throw new Error('The job wrote no G-code');
-      guard();
-      this.#step = 'sending';
-      await this.#api.print(
-        {
-          deviceId: printer.id,
-          storage: result.storage,
-          source: result.path,
-          name: result.path.split('/').at(-1) ?? result.path,
-        },
-        this.#signal,
-        guard,
-      );
-      this.#live();
-      this.#notice = {
-        key: 'slicer.plate.notice.printing',
-        params: { printer: printer.name },
-      };
-      return true;
+    const watch = $effect.root(() => {
+      $effect(() => {
+        if (!stillSendable(pressed, current())) stale.abort();
+      });
     });
-    return ok === true;
+    try {
+      const ok = await this.#run(async () => {
+        try {
+          const job = await this.#slicedJob(input, send);
+          const result = job.result;
+          if (!result) throw new Error('The job wrote no G-code');
+          send.guard();
+          this.#step = 'sending';
+          await this.#api.print(
+            {
+              deviceId: printer.id,
+              storage: result.storage,
+              source: result.path,
+              name: result.path.split('/').at(-1) ?? result.path,
+            },
+            send.signal,
+            send.guard,
+          );
+        } catch (thrown) {
+          // A request cut short by the stale signal fails as a network
+          // error; it is the change the person should be told about.
+          if (stale.signal.aborted && !this.#signal.aborted)
+            throw new PlateChanged();
+          throw thrown;
+        }
+        this.#live();
+        this.#notice = {
+          key: 'slicer.plate.notice.printing',
+          params: { printer: printer.name },
+        };
+        return true;
+      });
+      return ok === true;
+    } finally {
+      watch();
+    }
   }
 
   /** Slices the plate if it changed and answers its G-code as a file. */
   async download(input: PlateInput): Promise<File | undefined> {
     return this.#run(async () => {
-      const job = await this.#slicedJob(input);
+      const job = await this.#slicedJob(input, this.#pageOnly);
       const result = job.result;
       if (!result) throw new Error('The job wrote no G-code');
       const blob = await this.#api.download(
@@ -205,6 +241,16 @@ export class PlateFlow {
       );
       return new File([blob], result.path.split('/').at(-1) ?? 'plate.gcode');
     });
+  }
+
+  /** What an action that sends nothing to a printer waits under: the page alone. */
+  get #pageOnly(): Send {
+    return {
+      guard: () => {
+        this.#live();
+      },
+      signal: this.#signal,
+    };
   }
 
   /** Stops the step once the workspace has closed, before anything else is sent. */
@@ -229,31 +275,31 @@ export class PlateFlow {
     }
   }
 
-  async #savedPath(input: PlateInput): Promise<string> {
+  async #savedPath(input: PlateInput, send: Send): Promise<string> {
     const saved = this.#saved;
     if (saved?.storage === input.storage && saved.meshKey === input.meshKey)
       return saved.path;
 
-    this.#live();
+    send.guard();
     this.#step = 'saving';
     const path = await this.#api.save(
       input.storage,
       placedName(input.name),
       makeSTL(input.meshes),
-      this.#signal,
+      send.signal,
     );
-    this.#live();
     this.#saved = { meshKey: input.meshKey, storage: input.storage, path };
+    send.guard();
     return path;
   }
 
-  async #slicedJob(input: PlateInput): Promise<Job> {
+  async #slicedJob(input: PlateInput, send: Send): Promise<Job> {
     const signature = signatureOf(input);
     const known = this.slicedFor(signature);
     if (known) return known;
 
-    const path = await this.#savedPath(input);
-    this.#live();
+    const path = await this.#savedPath(input, send);
+    send.guard();
     this.#step = 'slicing';
     let job = await this.#api.submit(
       {
@@ -262,13 +308,14 @@ export class PlateFlow {
         profile: input.profile,
         settings: input.settings,
       },
-      this.#signal,
+      send.signal,
     );
-    this.#live();
+    send.guard();
     while (!ENDED.has(job.state)) {
-      await pause(this.#pollMs, this.#signal);
-      job = await this.#api.job(job.id, this.#signal);
-      this.#live();
+      await pause(this.#pollMs, send.signal);
+      send.guard();
+      job = await this.#api.job(job.id, send.signal);
+      send.guard();
     }
     if (job.state !== 'done') {
       // describeFault reads the code and the server's message off what is thrown.

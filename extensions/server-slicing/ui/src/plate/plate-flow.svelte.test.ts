@@ -1,5 +1,6 @@
 import { BoxGeometry, Matrix4 } from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { PrusaConnect } from '@prusa/connect';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Job } from '../api';
@@ -8,7 +9,7 @@ import {
   slicedJob,
   testPrepare,
 } from '../views/prepare-panel/prepare-fixtures';
-import type { PrepareApi } from '../views/prepare-panel/prepare-api';
+import { type PrepareApi, prepareOn } from '../views/prepare-panel/prepare-api';
 import { PlateFlow, type PlateInput, signatureOf } from './plate-flow.svelte';
 import { type SendSnapshot } from './sendable';
 
@@ -184,7 +185,9 @@ describe('slicing and printing the plate', () => {
       await expect(
         flow.print(inputOf(), henryPrinter, changingTo(pressed, now)),
       ).resolves.toBe(false);
-      expect(api.submit).toHaveBeenCalledTimes(1);
+      // The change is seen before the plate is even uploaded.
+      expect(api.save).not.toHaveBeenCalled();
+      expect(api.submit).not.toHaveBeenCalled();
       expect(api.print).not.toHaveBeenCalled();
       expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
       expect(flow.step).toBe('idle');
@@ -266,5 +269,142 @@ describe('slicing and printing the plate', () => {
     controller.abort();
     await expect(sliced).resolves.toBeUndefined();
     expect(flow.fault).toBeUndefined();
+  });
+});
+
+describe('a print that goes stale before the slice is done', () => {
+  const pressed = (): SendSnapshot => ({
+    plate: signatureOf(inputOf()),
+    printer: 'henry',
+    action: 'print',
+    sendable: true,
+  });
+
+  /** A promise and the function that settles it, for a request held open. */
+  const held = <T>() => {
+    let settle: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  };
+
+  it('creates no job when the printer changes while the plate is uploaded', async () => {
+    const upload = held<string>();
+    const api = recording({ save: () => upload.promise });
+    let now = pressed();
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+    const printed = flow.print(inputOf(), henryPrinter, () => now);
+    await vi.waitFor(() => {
+      expect(api.save).toHaveBeenCalled();
+    });
+
+    now = { ...now, printer: 'xl' };
+    upload.settle('bracket-placed.stl');
+    await expect(printed).resolves.toBe(false);
+    expect(api.submit).not.toHaveBeenCalled();
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+  });
+
+  it('reads no job when the printer changes while the job is created', async () => {
+    const created = held<Job>();
+    const api = recording({ submit: () => created.promise });
+    let now = pressed();
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+    const printed = flow.print(inputOf(), henryPrinter, () => now);
+    await vi.waitFor(() => {
+      expect(api.submit).toHaveBeenCalled();
+    });
+
+    now = { ...now, printer: 'xl' };
+    created.settle(placedJob);
+    await expect(printed).resolves.toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(api.job).not.toHaveBeenCalled();
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The SDK itself, on a fetch that fails the first request `failing` sends
+   * and makes the plate stale as it does, so only a stale signal stops the
+   * SDK's own retry.
+   */
+  const transportThatFails = (
+    failing: (url: string, method: string) => boolean,
+    stale: () => void,
+  ) => {
+    const sent: string[] = [];
+    const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      const method = init?.method ?? 'GET';
+      sent.push(`${method} ${url}`);
+      if (failing(url, method)) {
+        stale();
+        return Promise.reject(new TypeError('the connection dropped'));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ path: 'bracket-placed.stl' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    });
+    const client = new PrusaConnect({
+      auth: { kind: 'session' },
+      fetch,
+      retryDelay: 50,
+    });
+    return { client, sent };
+  };
+
+  it('does not let the SDK send the upload again once the plate is stale', async () => {
+    let now = $state(pressed());
+    const { client, sent } = transportThatFails(
+      (_url, method) => method === 'PUT',
+      () => {
+        now = { ...now, printer: 'xl' };
+      },
+    );
+    const api: PrepareApi = {
+      ...recording(),
+      save: prepareOn(client, {
+        submitJob: () => Promise.resolve(placedJob),
+        readJob: () => Promise.resolve(slicedJob),
+      }).save,
+    };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await expect(flow.print(inputOf(), henryPrinter, () => now)).resolves.toBe(
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent.filter((line) => line.startsWith('PUT '))).toHaveLength(1);
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+  });
+
+  it('does not let the SDK read the printer’s storages again once the plate is stale', async () => {
+    let now = $state(pressed());
+    const { client, sent } = transportThatFails(
+      (url) => url.includes('/devices/henry/storages'),
+      () => {
+        now = { ...now, sendable: false };
+      },
+    );
+    const api: PrepareApi = {
+      ...recording(),
+      print: prepareOn(client, {
+        submitJob: () => Promise.resolve(placedJob),
+        readJob: () => Promise.resolve(slicedJob),
+      }).print,
+    };
+    const flow = new PlateFlow(api, new AbortController().signal, 1);
+
+    await expect(flow.print(inputOf(), henryPrinter, () => now)).resolves.toBe(
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(sent.filter((line) => line.includes('/storages'))).toHaveLength(1);
+    expect(sent.filter((line) => line.startsWith('POST '))).toHaveLength(0);
+    expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
   });
 });
