@@ -22,6 +22,9 @@ importers:
       '@prusa/connect-ui':
         specifier: link:../../../packages/svelte
         version: link:../../../packages/svelte
+      remus-wasm-io:
+        specifier: link:vendor/remus-wasm-io
+        version: link:vendor/remus-wasm-io
       server-slicing-client:
         specifier: link:../client
         version: link:../client

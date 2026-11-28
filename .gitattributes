@@ -48,3 +48,8 @@ packages/graphql/schema.graphql text eol=lf
 # CRLF checkout, each build leaves the tree modified and the binary's version
 # reads `+dirty`.
 packages/svelte/src/i18n/catalogues.ts text eol=lf
+
+# A copy of another project's files, held to their SHA-256 in SHA256SUMS
+# (extensions/server-slicing/ui/vendor/remus-wasm-io/README.md). Git converts
+# no line ending in them, so a checkout holds the bytes the sums describe.
+extensions/server-slicing/ui/vendor/remus-wasm-io/** -text
