@@ -179,9 +179,28 @@ RUN TAGS="$(go run ./cmd/detect-build-tags --config "$CONFIG_FILE" --variant ful
     -ldflags="-X github.com/prusa3d/prusa-connect/internal/kernel/version.stamped=${BUILD_VERSION} -X github.com/prusa3d/prusa-connect/internal/kernel/version.docsURL=${DOCS_URL} -X github.com/prusa3d/prusa-connect/internal/upgrade.officialPublicKeys=${UPGRADE_PUBLIC_KEYS}" \
     -o /prusa_connect ./cmd/prusa-connect
 
+FROM scratch AS buddy3d-camera-source
+ADD https://github.com/prusa3d/prusa-connect.git#a4af5a5716fef43b6393723687e0377282cac888:extensions/buddy3d-camera /buddy3d-camera/
+
+FROM packages-builder AS buddy3d-camera-ui
+COPY --from=buddy3d-camera-source /buddy3d-camera ./extensions/buddy3d-camera
+RUN cd extensions/buddy3d-camera/client && pnpm install --frozen-lockfile && pnpm run build && \
+    cd ../ui && pnpm install --frozen-lockfile && pnpm run build && test -f dist/ui/index.js
+
+FROM builder AS buddy3d-camera-release
+ARG TARGETOS TARGETARCH
+COPY --from=buddy3d-camera-source /buddy3d-camera ./extensions/buddy3d-camera
+COPY --from=buddy3d-camera-ui /app/extensions/buddy3d-camera/ui/dist ./extensions/buddy3d-camera/ui/dist
+RUN BINARY="/tmp/buddy3d-camera_${TARGETOS}_${TARGETARCH}" && \
+    GOOS="$TARGETOS" GOARCH="$TARGETARCH" CGO_ENABLED=0 \
+    go -C extensions/buddy3d-camera build -mod=readonly -o "$BINARY" . && \
+    cp extensions/buddy3d-camera/openapi.json extensions/buddy3d-camera/ui/dist/ && \
+    sh extensions/scripts/pack-release.sh extensions/buddy3d-camera/ui/dist "$BINARY" /opt/modules/buddy3d-camera
+
 FROM scratch AS home-assistant-files
 COPY --from=builder /prusa_connect /prusa_connect
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=buddy3d-camera-release /opt/modules/buddy3d-camera /opt/modules/buddy3d-camera
 
 FROM builder AS extension-packager
 ARG TARGETOS TARGETARCH TARGETVARIANT

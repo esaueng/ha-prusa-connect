@@ -46,6 +46,31 @@ or TLS for the printers. For a dedicated printer listener, choose port
 `8443` in the wizard and keep it available on the host before pairing.
 If you enable web HTTPS, open the app's `https://` address directly.
 
+## Pair a Buddy3D camera
+
+The app includes the Buddy3D camera extension. On a new installation, open
+**Settings > Extensions** in Prusa Connect and install **Buddy3D camera**.
+Approve TCP port `9443` so the camera can reach the app on the local network.
+
+For an existing installation, use a Home Assistant host shell with Docker
+access. Add the following entry under `core` in `/data/prusa-connect/config.yaml`
+inside the app container. If `modules_local` already exists, add the entry
+to that mapping. Keep the file owned by `prusa:prusa` with mode `0600` and
+restart the app.
+
+```yaml
+core:
+  modules_local:
+    github.com/prusa3d/buddy3d-camera: /opt/modules/buddy3d-camera
+```
+
+In the extension settings, use the Home Assistant host's LAN address as
+the address the camera dials. Keep `9443` free on that host. In the printer's
+**Cameras** tab, add a camera of type **Buddy3D camera** and follow its
+pairing instructions. The camera needs firmware `3.1.7` or later and a
+FAT32 microSD card for the pairing file. The browser must be able to reach
+the camera on the network to play its WebRTC live view.
+
 ## Back up and update
 
 The app stores its configuration, database and print files in its private

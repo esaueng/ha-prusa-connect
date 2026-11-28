@@ -9,11 +9,11 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { launch, open } from '../ux/measure.ts';
+import { launch } from '../ux/measure.ts';
 import { ROUTES } from '../ux/routes.ts';
 import { startUxServer } from '../ux/server.ts';
 import { ceilingFor } from './ceilings.ts';
-import { count, METRICS, type CraftCount } from './measure.ts';
+import { count, METRICS, openCraftRoute, type CraftCount } from './measure.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +27,7 @@ const routes: Record<string, CraftCount> = {};
 
 try {
   for (const route of ROUTES) {
-    const sheet = await open(browser, server.url, route.path);
+    const sheet = await openCraftRoute(browser, server.url, route.path);
     try {
       routes[route.name] = await count(sheet.page);
       // Written straight out rather than through the console, which the lint
