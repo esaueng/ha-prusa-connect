@@ -649,3 +649,27 @@ describe('what the re-check of the notes found', () => {
     await expect.element(status()).toMatchTextContent('1 part');
   });
 });
+
+describe('what the re-check of the queue rebase found', () => {
+  it('lets a click on the text of a note reach the plate, and Dismiss take its own', async () => {
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: workspace() });
+    drop(await loadFixture('block-and-peg-inch.step'));
+    const text = page.getByText(
+      'block-and-peg-inch.step: The 2 bodies of the STEP file are one part on the plate.',
+    );
+    await expect.element(text).toBeVisible();
+    const centre = (element: Element): [number, number] => {
+      const box = element.getBoundingClientRect();
+      return [box.left + box.width / 2, box.top + box.height / 2];
+    };
+
+    expect(document.elementFromPoint(...centre(text.element()))).toBe(
+      page.getByLabelText('3D build plate view').element(),
+    );
+    const dismiss = page.getByRole('button', { name: 'Dismiss' }).element();
+    expect(
+      dismiss.contains(document.elementFromPoint(...centre(dismiss))),
+    ).toBe(true);
+  });
+});

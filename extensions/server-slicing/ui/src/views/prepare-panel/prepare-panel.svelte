@@ -773,11 +773,12 @@
       <div class="grid justify-items-center gap-1">
         {#each shownNotes as note (note.id)}
           <p
-            class="pointer-events-auto flex items-center gap-1 border-s-2 border-primary bg-card py-0.5 ps-3 pe-0.5 text-sm text-foreground"
+            class="flex items-center gap-1 border-s-2 border-primary bg-card py-0.5 ps-3 pe-0.5 text-sm text-foreground"
             data-part="plate-notice"
           >
             <span>{note.text}</span>
             <Button
+              class="pointer-events-auto"
               variant="ghost"
               size="icon-sm"
               label={t('slicer.plate.dismissNote')}
