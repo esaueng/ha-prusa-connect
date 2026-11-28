@@ -30,6 +30,7 @@
   } from './model';
   import { placedName, type Destination, type PrepareApi } from './prepare-api';
   import { plateScene, type PlateScene } from './scene';
+  import { ThreeMFRoleError } from './three-mf-roles';
 
   let {
     beds = {},
@@ -140,6 +141,7 @@
           ? 'slicer.prepare.storageReadFailed'
           : 'slicer.prepare.badModel';
         if (error instanceof ModelLimitError) key = 'slicer.prepare.modelLimit';
+        if (error instanceof ThreeMFRoleError) key = 'slicer.prepare.partRoles';
         modelFault = t(key);
       }
     } finally {
@@ -421,6 +423,11 @@
         {#if fileName}
           <p class="truncate text-sm text-muted-foreground" title={fileName}>
             {fileName}
+          </p>
+        {/if}
+        {#if fileName.toLowerCase().endsWith('.3mf')}
+          <p class="text-sm text-muted-foreground">
+            {t('slicer.prepare.geometryOnly')}
           </p>
         {/if}
         <div class="grid grid-cols-2 gap-2">

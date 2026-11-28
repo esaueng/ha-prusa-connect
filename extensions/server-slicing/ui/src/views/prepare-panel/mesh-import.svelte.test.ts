@@ -3,9 +3,9 @@ import { expect, it } from 'vitest';
 
 import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 import { combineParts, readMeshFile } from './mesh-import';
-import { readModel } from './model';
+import { fits, orientedModel, readModel, upright } from './model';
 
-import { loadFixture } from './prepare-fixtures';
+import { bed, loadFixture } from './prepare-fixtures';
 
 it('keeps repeated instances and composes build and nested component transforms in millimetres', async () => {
   const model = await readMeshFile(
@@ -81,5 +81,45 @@ it('centres a plain ASCII STL in the editor and leaves it without saved placemen
   expect(floor).toBe(0);
   expect(geometry.boundingBox?.min.toArray()).toEqual([-2, -3, -2]);
   expect(geometry.boundingBox?.max.toArray()).toEqual([2, 3, 2]);
+  geometry.dispose();
+});
+
+it.each(['prusa-volumes.3mf', 'bambu-parts.3mf'])(
+  'imports only the solid geometry from %s',
+  async (name) => {
+    const { parts } = await readMeshFile(await loadFixture(name));
+    expect(parts).toHaveLength(1);
+    const [part] = parts;
+    if (!part) throw new Error('The project has no solid part');
+    part.geometry.computeBoundingBox();
+    expect(part.geometry.boundingBox?.max.toArray()).toEqual([4, 4, 4]);
+    const placed = combineParts(parts);
+    expect(placed.getAttribute('position').count).toBe(12);
+    placed.computeBoundingBox();
+    expect(placed.boundingBox?.min.toArray()).toEqual([20, 30, 0]);
+    expect(placed.boundingBox?.max.toArray()).toEqual([24, 34, 4]);
+    placed.dispose();
+    part.geometry.dispose();
+  },
+);
+
+it.each(['prusa-incomplete-roles.3mf', 'bambu-unknown-role.3mf'])(
+  'rejects %s when its role metadata cannot classify the entire model',
+  async (name) => {
+    await expect(readMeshFile(await loadFixture(name))).rejects.toThrow(
+      'Could not determine the 3MF part roles',
+    );
+  },
+);
+
+it('lifts a 3MF from below the plate and keeps its stored XY position', async () => {
+  const { geometry, placedAt, floor } = await readModel(
+    await loadFixture('below-bed.3mf'),
+  );
+  if (!placedAt) throw new Error('The 3MF did not keep its placement');
+  expect(placedAt).toEqual([22, 32]);
+  const { bounds } = orientedModel(geometry, upright, floor);
+  expect(bounds.min.z).toBe(0);
+  expect(fits(bounds, placedAt, bed)).toBe(true);
   geometry.dispose();
 });

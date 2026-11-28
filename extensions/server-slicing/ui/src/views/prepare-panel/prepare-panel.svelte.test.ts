@@ -148,6 +148,9 @@ it.each(['pick', 'drop'])(
 
     const slice = page.getByRole('button', { name: 'Save and slice' });
     await expect.element(slice).toBeEnabled();
+    await expect
+      .element(page.getByText(/Apply any cuts made with negative volumes/u))
+      .toBeVisible();
     const x = page.getByLabelText('X (mm)', { exact: true });
     const y = page.getByLabelText('Y (mm)', { exact: true });
     const xInput = x.element();
@@ -206,6 +209,30 @@ it('shows the import limit when a 3MF expands beyond the archive budget', async 
     .upload(await loadFixture('large-archive.3mf'));
   await expect
     .element(page.getByText(/The model exceeds the import limits/u))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole('button', { name: 'Save and slice' }))
+    .toBeDisabled();
+});
+
+it('asks for geometry only when a project has unknown part roles', async () => {
+  const { container } = await render(PreparePanel, {
+    props: {
+      api: testPrepare,
+      beds: { 'henry-petg': bed },
+      hasSlicer: true,
+      t,
+      onSliced: vi.fn(),
+    },
+  });
+  const picker =
+    container.querySelector<HTMLInputElement>('input[type="file"]');
+  if (!picker) throw new Error('Prepare did not render the file picker');
+  await page
+    .elementLocator(picker)
+    .upload(await loadFixture('bambu-unknown-role.3mf'));
+  await expect
+    .element(page.getByText(/Could not determine the 3MF part roles/u))
     .toBeVisible();
   await expect
     .element(page.getByRole('button', { name: 'Save and slice' }))

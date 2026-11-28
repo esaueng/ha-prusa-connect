@@ -7,6 +7,13 @@ import {
 } from './import-limits';
 import type { MeshPart, MeshReader } from './mesh-import';
 import { LOCAL_FILE, ThreeMFArchive } from './three-mf-archive';
+import {
+  readProjectRoles,
+  selectPrusaTriangles,
+  ThreeMFRoleError,
+  type ProjectRoles,
+} from './three-mf-roles';
+import { child, children, idOf, invalid } from './three-mf-xml';
 
 const CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 const PRODUCTION =
@@ -29,32 +36,6 @@ const units = new Map([
   ['foot', 304.8],
   ['meter', 1000],
 ]);
-
-const invalid = (message: string): Error =>
-  new Error(`Invalid 3MF: ${message}`);
-
-const children = function* (
-  parent: Element,
-  name: string,
-): IterableIterator<Element> {
-  const { namespaceURI } = parent;
-  for (const element of parent.children)
-    if (element.localName === name && element.namespaceURI === namespaceURI)
-      yield element;
-};
-
-const child = (parent: Element, name: string): Element | undefined => {
-  for (const element of children(parent, name)) return element;
-  return undefined;
-};
-
-const idOf = (element: Element, attribute: string): number => {
-  const text = element.getAttribute(attribute)?.trim() ?? '';
-  const id = Number(text);
-  if (!/^\d+$/u.test(text) || !Number.isSafeInteger(id))
-    throw invalid(`invalid ${attribute}`);
-  return id;
-};
 
 const decimal = (text: string): number => {
   const value = Number(text);
@@ -131,7 +112,8 @@ interface Model {
   unit: number;
   root: Element;
   objects: Map<number, Element>;
-  meshes: Map<number, BufferGeometry>;
+  meshes: Map<number, BufferGeometry | null>;
+  roles?: ProjectRoles | undefined;
 }
 
 class ThreeMFReader {
@@ -214,27 +196,37 @@ class ThreeMFReader {
         throw invalid('duplicate or zero object ID');
       objects.set(id, object);
     }
-    const model = {
+    const model: Model = {
       unit,
       root,
       objects,
-      meshes: new Map<number, BufferGeometry>(),
+      meshes: new Map<number, BufferGeometry | null>(),
     };
     this.#models.set(key, model);
     return model;
   }
 
   #addMesh(model: Model, id: number, mesh: Element, transform: Matrix4): void {
-    const saved = model.meshes.get(id);
-    const triangleCount = saved
-      ? (saved.index?.count ?? 0) / 3
-      : child(mesh, 'triangles')?.childElementCount;
-    if (!triangleCount) throw invalid('empty mesh');
-    this.#triangles += triangleCount;
+    let geometry = model.meshes.get(id);
+    if (geometry === undefined) {
+      const triangles = child(mesh, 'triangles');
+      const triangleCount = triangles?.childElementCount ?? 0;
+      if (!triangles || !triangleCount) throw invalid('empty mesh');
+      if (triangleCount > MAX_TRIANGLES)
+        throw new ModelLimitError('3MF has more than 300,000 triangles');
+      const selection =
+        model.roles?.kind === 'prusa'
+          ? selectPrusaTriangles(model.roles.objects.get(id), triangleCount)
+          : undefined;
+      geometry = readMesh(mesh, triangles, model.unit, selection);
+      model.meshes.set(id, geometry);
+    }
+    if (!geometry) return;
+
+    this.#triangles +=
+      (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
     if (this.#triangles > MAX_TRIANGLES)
       throw new ModelLimitError('3MF has more than 300,000 triangles');
-    const geometry = saved ?? readMesh(mesh, model.unit, triangleCount);
-    model.meshes.set(id, geometry);
     this.#parts.push({ geometry, transform });
   }
 
@@ -252,21 +244,45 @@ class ThreeMFReader {
     const target = ref.getAttributeNS(PRODUCTION, 'path');
     const path = target === null ? parentPath : packagePath(parentPath, target);
     const model = target === null ? parent : await this.#model(path);
+    if (parent.roles?.kind === 'prusa' && model !== parent)
+      throw new ThreeMFRoleError();
     const id = idOf(ref, 'objectid');
     const object = model.objects.get(id);
     if (!object || ancestors.has(object))
       throw invalid('missing or circular object reference');
+    const type = object.getAttribute('type')?.trim() ?? 'model';
+    if (['support', 'solidsupport', 'surface', 'other'].includes(type)) return;
+    if (type !== 'model') throw new ThreeMFRoleError();
+
+    let roles: Map<number, boolean> | undefined;
+    if (ancestors.size === 0 && parent.roles?.kind === 'bambu') {
+      roles = parent.roles.objects.get(id);
+      if (!roles) throw new ThreeMFRoleError();
+    }
+
     const transform = parentTransform
       .clone()
       .multiply(transformOf(ref, parent.unit));
     const mesh = child(object, 'mesh');
     const components = child(object, 'components');
     if (mesh && !components) {
-      this.#addMesh(model, id, mesh, transform);
+      if (roles && roles.size !== 1) throw new ThreeMFRoleError();
+      if (!roles || roles.values().next().value)
+        this.#addMesh(model, id, mesh, transform);
     } else if (components && !mesh && child(components, 'component')) {
       ancestors.add(object);
-      for (const component of children(components, 'component'))
+      const seen = new Set<number>();
+      for (const component of children(components, 'component')) {
+        if (roles) {
+          const id = idOf(component, 'objectid');
+          const printable = roles.get(id);
+          if (printable === undefined) throw new ThreeMFRoleError();
+          seen.add(id);
+          if (!printable) continue;
+        }
         await this.#visit(path, model, component, transform, ancestors);
+      }
+      if (roles && seen.size !== roles.size) throw new ThreeMFRoleError();
       ancestors.delete(object);
     } else {
       throw invalid('object must contain a mesh or components');
@@ -277,6 +293,10 @@ class ThreeMFReader {
     try {
       const path = await this.#rootPath();
       const model = await this.#model(path);
+      model.roles = await readProjectRoles(
+        (name) => this.#xml(name),
+        (name) => this.#archive.has(name),
+      );
       const build = child(model.root, 'build');
       if (!build) throw invalid('missing build');
       for (const item of children(build, 'item')) {
@@ -288,7 +308,7 @@ class ThreeMFReader {
       return this.#parts;
     } catch (error) {
       for (const model of this.#models.values())
-        for (const mesh of model.meshes.values()) mesh.dispose();
+        for (const mesh of model.meshes.values()) mesh?.dispose();
       throw error;
     }
   }
@@ -296,12 +316,15 @@ class ThreeMFReader {
 
 const readMesh = (
   mesh: Element,
+  triangles: Element,
   unit: number,
-  triangleCount: number,
-): BufferGeometry => {
+  selection: ReturnType<typeof selectPrusaTriangles> | undefined,
+): BufferGeometry | null => {
+  const triangleCount = triangles.childElementCount;
+  const kept = selection?.count ?? triangleCount;
+  if (kept === 0) return null;
   const vertices = child(mesh, 'vertices');
-  const triangles = child(mesh, 'triangles');
-  if (!vertices || !triangles) throw invalid('missing vertices or triangles');
+  if (!vertices) throw invalid('missing vertices');
   const vertexCount = vertices.childElementCount;
   if (vertexCount > 3 * MAX_TRIANGLES)
     throw new ModelLimitError('3MF has too many vertices');
@@ -318,9 +341,13 @@ const readMesh = (
   }
   if (at !== position.length) throw invalid('invalid vertex element');
 
-  const index = new Uint32Array(triangleCount * 3);
+  const index = new Uint32Array(kept * 3);
   at = 0;
+  let triangleIndex = 0;
   for (const triangle of children(triangles, 'triangle')) {
+    const printable = !selection || selection.mask[triangleIndex] === 1;
+    triangleIndex += 1;
+    if (!printable) continue;
     for (const corner of ['v1', 'v2', 'v3']) {
       const vertex = idOf(triangle, corner);
       if (vertex >= vertexCount) throw invalid('missing triangle vertex');
@@ -328,7 +355,21 @@ const readMesh = (
       at += 1;
     }
   }
-  if (at !== index.length) throw invalid('invalid triangle element');
+  if (at !== index.length || triangleIndex !== triangleCount)
+    throw invalid('invalid triangle element');
+
+  if (kept !== triangleCount) {
+    // Use only the vertices of printable triangles so dropped volumes cannot
+    // affect the bounds of an imported part.
+    const compact = new Float32Array(index.length * 3);
+    index.forEach((vertex, corner) => {
+      compact.set(position.subarray(vertex * 3, vertex * 3 + 3), corner * 3);
+    });
+    return new BufferGeometry().setAttribute(
+      'position',
+      new BufferAttribute(compact, 3),
+    );
+  }
 
   return new BufferGeometry()
     .setAttribute('position', new BufferAttribute(position, 3))

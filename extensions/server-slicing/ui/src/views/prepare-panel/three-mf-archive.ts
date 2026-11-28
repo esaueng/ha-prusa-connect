@@ -141,6 +141,10 @@ export class ThreeMFArchive {
     if (at !== end) throw invalidZip();
   }
 
+  has(name: string): boolean {
+    return this.#entries.has(name.toLowerCase());
+  }
+
   async read(name: string): Promise<Uint8Array | undefined> {
     const entry = this.#entries.get(name.toLowerCase());
     if (!entry) return undefined;

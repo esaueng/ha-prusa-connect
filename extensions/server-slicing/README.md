@@ -95,7 +95,9 @@ Open **Slicing → Prepare**, or choose **Open in slicer** on an STL in Storage.
 Pick a saved profile with a rectangular bed. The build plate uses that
 profile's dimensions in millimetres. Open or drop one STL or 3MF file. The
 browser puts a new STL in the centre of the bed. It opens a 3MF in the
-positions stored in the file and combines its objects into one model.
+positions stored in the file and combines its solid objects into one model.
+If the model extends below the bed, Prepare lifts it to the bed and keeps
+its XY position.
 The placement controls move, rotate and scale the whole model. Reset
 placement centres it and puts its lowest point on the bed.
 
@@ -103,8 +105,11 @@ placement centres it and puts its lowest point on the bed.
 storage. The saved STL has a unique name and keeps its position when opened
 again in Prepare. Slicing uses the selected profile. 3MF project settings,
 colours, material assignments, support and seam painting, and plate
-definitions are dropped. Export one plate at a time if the project has
-several plates.
+definitions are dropped. Prepare skips modifiers, negative volumes,
+support tools and other non-model geometry. Apply cuts made with negative
+volumes before exporting. Export one plate at a time if the project has
+several plates. If Prepare cannot read the part roles, including those in
+PrusaSlicer 3 projects, export the solid model as STL or geometry-only 3MF.
 
 The editor takes files up to 20 MiB and 300,000 triangles after placing
 all copies. A 3MF archive can expand to 64 MiB.

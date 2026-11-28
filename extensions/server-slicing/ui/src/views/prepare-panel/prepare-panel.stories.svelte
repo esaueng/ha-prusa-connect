@@ -39,4 +39,11 @@
     api: { ...testPrepare, read: () => loadFixture('large-archive.3mf') },
   }}
 />
+<Story
+  name="Unknown part roles in 3MF"
+  args={{
+    source: 'local:bambu-unknown-role.3mf',
+    api: { ...testPrepare, read: () => loadFixture('bambu-unknown-role.3mf') },
+  }}
+/>
 <Story name="No saved profile" args={{ beds: {} }} />

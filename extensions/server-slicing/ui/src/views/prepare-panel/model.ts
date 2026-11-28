@@ -44,7 +44,7 @@ export const readModel = async (
       if (bounds) {
         const center = bounds.getCenter(new Vector3());
         placedAt = [center.x, center.y];
-        floor = bounds.min.z;
+        floor = Math.max(0, bounds.min.z);
       }
     }
     geometry.center();
