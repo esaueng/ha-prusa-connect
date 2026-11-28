@@ -15,10 +15,16 @@ import { fileURLToPath } from 'node:url';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
-import { launch, open } from '../ux/measure.ts';
+import { launch } from '../ux/measure.ts';
 import { ROUTES } from '../ux/routes.ts';
 import { ceilingFor, CEILINGS } from './ceilings.ts';
-import { count, METRICS, type CraftCount, type Metric } from './measure.ts';
+import {
+  count,
+  METRICS,
+  openCraftRoute,
+  type CraftCount,
+  type Metric,
+} from './measure.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -69,7 +75,7 @@ describe('every route holds its craft counts', () => {
       const line = baseline.routes[route.name];
       expect(line, `${route.name} has no line in baseline.json`).toBeDefined();
 
-      const sheet = await open(browser, url, route.path);
+      const sheet = await openCraftRoute(browser, url, route.path);
       try {
         const measured = await count(sheet.page);
 

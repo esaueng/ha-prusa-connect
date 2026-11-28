@@ -10,7 +10,26 @@
 //
 // Everything inside `count()` runs in the page, so it names no import and
 // carries no type from this module.
-import type { Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
+
+import { open, type UxPage } from '../ux/measure.ts';
+
+/** Open a route in the state the craft baseline measures. */
+export const openCraftRoute = (
+  browser: Browser,
+  url: string,
+  path: string,
+): Promise<UxPage> => {
+  // The recorded credentials show an expiry badge as their due dates approach.
+  return open(
+    browser,
+    url,
+    path,
+    path === '/settings/tokens'
+      ? { prepare: (page) => page.clock.setFixedTime('2026-09-20T12:00:00Z') }
+      : undefined,
+  );
+};
 
 /** One route's craft counts. Every field is a number a test can pin. */
 export interface CraftCount {
