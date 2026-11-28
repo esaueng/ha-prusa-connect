@@ -117,8 +117,8 @@ order:
 | **Lay flat** | the flat face under the pointer lights up. A click turns the part so that face lies on the bed |
 | **Arrange** | arranges every part, or only the selected ones around the others, or adds a copy of the selection in free space |
 | **Undo** and the view | takes the last change back, and looks at the plate from an angle or from above |
-| printer | the printers you may see, with their state, model, material and bed size. The plate takes the bed of the printer chosen |
-| print settings | layer height, material, supports, infill, walls and brim, and the storage the files go to. The page keeps them for each printer |
+| printer | the printers you may see, with state, model, material and bed size. The plate takes the chosen printer's bed |
+| print settings | layer height, material, supports, infill, walls, brim and the storage for the files, kept for each printer |
 | **Print** | slices the plate and starts it on the printer |
 | ⋯ | the PrusaSlicer versions, the jobs and the API |
 
