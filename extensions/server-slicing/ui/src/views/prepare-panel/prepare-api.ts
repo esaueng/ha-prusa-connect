@@ -84,10 +84,12 @@ export interface PrepareApi {
     device: string,
     signal: AbortSignal,
   ) => Promise<QueueBlock | undefined>;
+  /** Checks access to a printer's queue again, then adds the job if the guard passes. */
   readonly enqueue: (
     job: string,
     device: string,
     signal: AbortSignal,
+    guard: SendGuard,
   ) => Promise<EnqueueResult>;
 }
 
@@ -245,7 +247,10 @@ export const prepareOn = (
       }
     }
   },
-  enqueue(id, device, signal) {
+  async enqueue(id, device, signal, guard) {
+    guard();
+    await api.checkPrintQueue({ path: { device } }, signal);
+    guard();
     return api.enqueueJob(
       { path: { id }, body: { device_id: device } },
       signal,

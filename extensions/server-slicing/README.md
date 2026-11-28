@@ -145,17 +145,18 @@ one.
 the G-code to an idle printer, which starts it. Once the plate is sliced, the
 button shows the print time from the G-code. A change to the plate or to the
 settings slices it again. The plate, its settings, the printer and its bed
-may change while the plate is sliced. When any of them did, the printer
-changed what it can do, or a part no longer fits, nothing is sent and the plate
-says so. The same check runs again right before the print starts. Nothing is
-sent after the page is closed.
+may change while the plate is sliced. If the printer changes state or any
+part of the plate changes or stops fitting, the plate stays on the page and
+shows a message. The same check runs just before a print starts or a queue
+entry is added. Closing the page stops a send that has yet to start.
 
 A printer that is printing, or that still holds a
 finished print, shows **Add to queue** instead. Install and enable the Print
 queue module and approve the call from Server slicing to use this button.
 Your account needs permission to operate Print queue and the printer and to
-read the storage that holds the G-code. After you add a file, Slicing shows
-how many prints are waiting.
+read the storage that holds the G-code. Slicing checks queue access again
+before adding the file. After the file is added, Slicing shows how many
+prints are waiting.
 
 The menu beside the button slices without printing, downloads the G-code,
 or saves the placed STL. A saved STL keeps its position when it is opened again.

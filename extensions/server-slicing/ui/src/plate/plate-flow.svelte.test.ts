@@ -40,6 +40,7 @@ const henryPrinter = { id: 'henry', name: 'Henry' };
 const unchangedFor = (input: PlateInput) => (): SendSnapshot => ({
   plate: signatureOf(input),
   printer: 'henry',
+  state: 'IDLE',
   action: 'print',
   sendable: true,
 });
@@ -170,6 +171,7 @@ describe('slicing and printing the plate', () => {
     const pressed: SendSnapshot = {
       plate: signatureOf(inputOf()),
       printer: 'henry',
+      state: 'IDLE',
       action: 'print',
       sendable: true,
     };
@@ -276,6 +278,7 @@ describe('adding the plate to a printer queue', () => {
   const pressed: SendSnapshot = {
     plate: signatureOf(inputOf()),
     printer: printer.id,
+    state: 'PRINTING',
     action: 'queue',
     sendable: true,
   };

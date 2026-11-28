@@ -183,11 +183,7 @@ export class PlateFlow {
     printer: { id: string; name: string },
     current: () => SendSnapshot,
   ): Promise<boolean> {
-    const pressed = current();
-    const guard: SendGuard = () => {
-      this.#live();
-      if (!stillSendable(pressed, current())) throw new PlateChanged();
-    };
+    const guard = this.#guardFor(current);
     const ok = await this.#run(async () => {
       const job = await this.#slicedJob(input);
       const result = job.result;
@@ -220,18 +216,18 @@ export class PlateFlow {
     printer: { id: string; name: string },
     current: () => SendSnapshot,
   ): Promise<void> {
-    const pressed = current();
+    const guard = this.#guardFor(current);
     await this.#run(async () => {
       this.#step = 'queueing';
       const job = await this.#slicedJob(input);
-      this.#live();
-      if (!stillSendable(pressed, current())) throw new PlateChanged();
+      guard();
       this.#step = 'queueing';
       try {
         const { waiting } = await this.#api.enqueue(
           job.id,
           printer.id,
           this.#signal,
+          guard,
         );
         this.#live();
         this.#waiting = { ...this.#waiting, [printer.id]: waiting };
@@ -270,6 +266,14 @@ export class PlateFlow {
   /** Stops the step once the workspace has closed, before anything else is sent. */
   #live(): void {
     if (this.#signal.aborted) throw new PageClosed();
+  }
+
+  #guardFor(current: () => SendSnapshot): SendGuard {
+    const pressed = current();
+    return () => {
+      this.#live();
+      if (!stillSendable(pressed, current())) throw new PlateChanged();
+    };
   }
 
   async #run<T>(work: () => Promise<T>): Promise<T | undefined> {

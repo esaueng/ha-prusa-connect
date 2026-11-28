@@ -165,6 +165,7 @@ describe('the build-plate workspace', () => {
       slicedJob.id,
       'charlie',
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     expect(api.print).not.toHaveBeenCalled();
 
@@ -643,6 +644,118 @@ describe('what the re-check found', () => {
 });
 
 describe('what the second re-check found', () => {
+  it('cannot add to the queue if the printer becomes idle during the first availability check', async () => {
+    let finish: () => void = () => undefined;
+    const api = recording({
+      checkQueue: () =>
+        new Promise<undefined>((resolve) => {
+          finish = () => {
+            resolve(undefined);
+          };
+        }),
+    });
+    const remember = memory();
+    remember.write('plate.printer', charlie.id);
+    const screen = await render(PreparePanel, {
+      props: props(api, { remember }),
+    });
+    const queue = page.getByRole('button', { name: 'Add to queue' });
+    await expect.element(queue).toBeDisabled();
+    await expect.poll(() => api.checkQueue.mock.calls.length).toBe(1);
+
+    await screen.rerender({
+      devices: [
+        henry,
+        { ...charlie, state: { ...charlie.state, '/state': 'IDLE' } },
+        xl,
+      ],
+    });
+    finish();
+
+    await expect
+      .element(page.getByRole('button', { name: 'Print', exact: true }))
+      .toBeEnabled();
+    await expect.element(queue).not.toBeInTheDocument();
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'while enqueueing',
+      false,
+      {
+        ...charlie,
+        state: { ...charlie.state, '/state': 'PAUSED' },
+      },
+    ],
+    [
+      'while retrying enqueue',
+      true,
+      {
+        ...charlie,
+        build_volume: { x_mm: 240, y_mm: 210, z_mm: 220 },
+      },
+    ],
+  ] as const)(
+    'adds nothing from a changed printer %s',
+    async (_, retry, changed) => {
+      let finish: () => void = () => undefined;
+      const pending = new Promise<undefined>((resolve) => {
+        finish = () => {
+          resolve(undefined);
+        };
+      });
+      const checkPrintQueue = vi.fn(() => Promise.resolve(undefined));
+      const enqueueJob = vi.fn(() => Promise.resolve({ waiting: 1 }));
+      const client = {} as ModuleHost['client'];
+      const api: PrepareApi = {
+        ...prepareOn(client, {
+          submitJob: () => Promise.resolve(slicedJob),
+          readJob: () => Promise.resolve(slicedJob),
+          checkPrintQueue,
+          enqueueJob,
+        }),
+        destinations: testPrepare.destinations,
+        read: testPrepare.read,
+        save: testPrepare.save,
+      };
+      const remember = memory();
+      remember.write('plate.printer', charlie.id);
+      const screen = await render(PreparePanel, {
+        props: props(api, { remember }),
+      });
+      const queue = page.getByRole('button', { name: /Add to queue/u });
+      await expect.element(queue).toBeEnabled();
+
+      if (retry) {
+        const code = 'server-slicing/PRINT_QUEUE_UNAVAILABLE';
+        enqueueJob.mockRejectedValueOnce(
+          Object.assign(new Error('Try again'), { code }),
+        );
+        await queue.click();
+        await expect
+          .element(page.getByText(code, { exact: true }))
+          .toBeVisible();
+        await expect.element(queue).toBeEnabled();
+        expect(enqueueJob).toHaveBeenCalledOnce();
+      }
+
+      checkPrintQueue.mockReturnValueOnce(pending);
+      await queue.click();
+      await expect
+        .poll(() => checkPrintQueue.mock.calls.length)
+        .toBe(retry ? 3 : 2);
+      await screen.rerender({ devices: [henry, changed, xl] });
+      finish();
+
+      await expect
+        .element(page.getByText(/The plate changed while it was sliced/u))
+        .toBeVisible();
+      expect(enqueueJob).toHaveBeenCalledTimes(retry ? 1 : 0);
+      await expect.element(status()).not.toMatchTextContent(/waiting/u);
+    },
+  );
+
   it('starts nothing when the bed shrinks while the printer’s storages are read', async () => {
     let storages: (page: unknown) => void = () => undefined;
     const printDeviceFile = vi.fn(() =>
@@ -665,6 +778,8 @@ describe('what the second re-check found', () => {
         {
           submitJob: () => Promise.resolve(placedJob),
           readJob: () => Promise.resolve(slicedJob),
+          checkPrintQueue: () => Promise.resolve(undefined),
+          enqueueJob: () => Promise.reject(new Error('printing queues no job')),
         },
       ),
       destinations: testPrepare.destinations,

@@ -339,8 +339,9 @@
 
   /** The plate and the printer as a send depends on them, read when asked. */
   const now = (): SendSnapshot => ({
-    plate: JSON.stringify([signature, bed]),
+    plate: JSON.stringify([signature, bed, printer?.bed]),
     printer: printer?.id,
+    state: printer?.state,
     action: decision.action,
     sendable:
       plate.printable &&
