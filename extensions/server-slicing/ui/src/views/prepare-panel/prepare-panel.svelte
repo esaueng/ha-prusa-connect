@@ -104,6 +104,8 @@
   let reads: Promise<void> = Promise.resolve();
   const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
+  /** What the batches read since the last idle moment say about their files. */
+  let importNotes = $state.raw<readonly string[]>([]);
   /** The STEP mesh tolerance for files added from now on, in mm. */
   let tolerance = $state(STEP_TOLERANCE_MM);
   /** A STEP file was added or refused, so its tolerance is shown. */
@@ -245,13 +247,19 @@
    * file that cannot be read is named in the faults, and the others are still
    * added.
    */
-  const load = (files: readonly (Promise<File> | File)[]): Promise<void> => {
+  const load = (
+    files: readonly (Promise<File> | File)[],
+    names: readonly string[] = [],
+  ): Promise<void> => {
     if (batches === 0) {
       modelFaults = [];
+      importNotes = [];
       notice = undefined;
     }
     batches += 1;
-    const read = reads.then(() => readBatch(files));
+    // A file is meshed at the tolerance shown when it was added.
+    const atTolerance = tolerance;
+    const read = reads.then(() => readBatch(files, names, atTolerance));
     reads = read.finally(() => {
       batches -= 1;
     });
@@ -261,16 +269,24 @@
   /** True once the workspace closed. A function, so each wait reads it anew. */
   const closed = (): boolean => controller.signal.aborted;
 
+  /**
+   * `names` holds the name of a file that is not here yet, such as one read
+   * from Storage, so a file that fails while it is read is still named.
+   */
   const readBatch = async (
     files: readonly (Promise<File> | File)[],
+    names: readonly string[],
+    atTolerance: number,
   ): Promise<void> => {
     const faults: string[] = [];
+    const notes: string[] = [];
     let threeMF = false;
-    for (const file of files) {
+    for (const [at, file] of files.entries()) {
       // A batch that waited for another may start after the page closed.
       if (closed()) return;
       let reading = true;
-      let name = '';
+      let name = names[at] ?? '';
+      stepUsed ||= isStep(name);
       try {
         const loaded = await file;
         if (closed()) return;
@@ -279,7 +295,7 @@
         stepUsed ||= isStep(loaded.name);
         // The workspace's signal stops a STEP worker when the page closes.
         const imported = await readMeshFile(loaded, {
-          tolerance,
+          tolerance: atTolerance,
           signal: controller.signal,
         });
         if (closed()) {
@@ -297,10 +313,12 @@
         }
         threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
         if (imported.bodies !== undefined && imported.bodies > 1)
-          notice = {
-            key: 'slicer.prepare.bodies',
-            params: { count: imported.bodies },
-          };
+          notes.push(
+            t('slicer.plate.fileFault', {
+              file: loaded.name,
+              reason: t('slicer.prepare.bodies', { count: imported.bodies }),
+            }),
+          );
       } catch (error) {
         if (closed()) return;
         const reason = reasonOf(error, reading);
@@ -310,7 +328,8 @@
       }
     }
     if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
-    if (threeMF) notice = { key: 'slicer.prepare.geometryOnly', params: {} };
+    if (threeMF) notes.push(t('slicer.prepare.geometryOnly'));
+    if (notes.length > 0) importNotes = [...importNotes, ...notes];
   };
 
   const isStep = (name: string): boolean => /\.(?:step|stp)$/iu.test(name);
@@ -389,6 +408,7 @@
     sendable:
       plate.printable &&
       printerBlockOf(printer, flow.queueBlock(printer?.id)) === undefined,
+    importing: loading,
   });
 
   const print = async (): Promise<void> => {
@@ -534,7 +554,11 @@
         if (!signal.aborted) destinationFault = describeFault(error);
       });
 
-    if (from) void load([api.read(from, signal)]);
+    if (from)
+      void load(
+        [api.read(from, signal)],
+        [parseFileRef(from)?.path.split('/').at(-1) ?? ''],
+      );
 
     return () => {
       controller.abort();
@@ -588,11 +612,16 @@
               min="0.001"
               max="1"
               step="any"
-              title={t('slicer.prepare.toleranceHint')}
+              aria-describedby="{id}-tolerance-note"
               value={tolerance}
               onchange={changeTolerance}
             />
           </div>
+          <span
+            id="{id}-tolerance-note"
+            class="text-xs whitespace-nowrap text-muted-foreground"
+            >{t('slicer.prepare.toleranceNote')}</span
+          >
         </div>
       {/if}
       <PrinterPicker {printers} chosen={printer?.id} {t} onChoose={choose} />
@@ -685,14 +714,24 @@
       role="status"
       aria-live="polite"
     >
-      {#if noticeText}
-        <p
-          class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
-          data-part="plate-notice"
-        >
-          {noticeText}
-        </p>
-      {/if}
+      <div class="grid justify-items-center gap-1">
+        {#each importNotes as note, at (at)}
+          <p
+            class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
+            data-part="plate-notice"
+          >
+            {note}
+          </p>
+        {/each}
+        {#if noticeText}
+          <p
+            class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
+            data-part="plate-notice"
+          >
+            {noticeText}
+          </p>
+        {/if}
+      </div>
     </div>
   </div>
 

@@ -13,6 +13,7 @@ import {
   StepMeshLimitError,
 } from './import-step';
 import { type ImportedMesh, readMeshFile } from './mesh-import';
+import type { Job } from '../../api';
 import type { PrepareApi } from './prepare-api';
 import {
   bed,
@@ -20,7 +21,9 @@ import {
   henry,
   loadFixture,
   memory,
+  modelFile,
   profileSettings,
+  slicedJob,
   testPrepare,
 } from './prepare-fixtures';
 import PreparePanel from './prepare-panel.svelte';
@@ -223,7 +226,7 @@ describe('a STEP file on the build plate', () => {
     await expect
       .element(
         page.getByText(
-          'The 2 bodies of the STEP file are one part on the plate.',
+          'block-and-peg-inch.step: The 2 bodies of the STEP file are one part on the plate.',
         ),
       )
       .toBeVisible();
@@ -374,5 +377,171 @@ describe('a STEP file on the build plate', () => {
       terminate.mockRestore();
       postMessage.mockRestore();
     }
+  });
+});
+
+/**
+ * Holds every answer a STEP worker sends until `release` is called, so a test
+ * decides when a read finishes instead of racing the worker.
+ */
+const holdWorkerAnswers = (): { release: () => void; restore: () => void } => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // Called below with call on the worker it belongs to.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const listen = Worker.prototype.addEventListener;
+  const spy = vi
+    .spyOn(Worker.prototype, 'addEventListener')
+    .mockImplementation(function (
+      this: Worker,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) {
+      const held =
+        type === 'message' && typeof listener === 'function'
+          ? (event: Event): void => {
+              void gate.then(() => {
+                listener.call(this, event);
+              });
+            }
+          : listener;
+      listen.call(this, type, held, options);
+    });
+  return {
+    release,
+    restore: () => {
+      spy.mockRestore();
+    },
+  };
+};
+
+const drop = (...files: File[]): void => {
+  const dataTransfer = new DataTransfer();
+  for (const file of files) dataTransfer.items.add(file);
+  page
+    .getByLabelText('3D build plate view')
+    .element()
+    .dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+};
+
+describe('what the re-check of the rebase found', () => {
+  it('sends nothing when a file is still read as the slice ends, and keeps Print off meanwhile', async () => {
+    let finish: (job: Job) => void = () => undefined;
+    const submit = vi.fn(
+      () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const job = vi.fn(() => Promise.resolve(slicedJob));
+    const print = vi.fn(testPrepare.print);
+    const answers = holdWorkerAnswers();
+    try {
+      await page.viewport(1440, 900);
+      await render(PreparePanel, {
+        props: workspace({ submit, job, print }, 'local:parts/bracket.stl'),
+      });
+      await expect.element(status()).toMatchTextContent('1 part');
+      const printButton = page.getByRole('button', {
+        name: 'Print',
+        exact: true,
+      });
+      await printButton.click();
+      await expect.poll(() => submit.mock.calls.length).toBe(1);
+
+      // A STEP file arrives while the plate is sliced; its worker's answer
+      // is held, so it is still being read when the slice ends.
+      drop(await loadFixture('block-and-peg-inch.step'));
+      await expect.element(page.getByText('Reading the model…')).toBeVisible();
+      finish(slicedJob);
+      await expect
+        .element(page.getByText(/The plate changed while it was sliced/u))
+        .toBeVisible();
+      expect(print).not.toHaveBeenCalled();
+      // Once sliced, the button's name carries the print time too.
+      const printNow = page
+        .getByTestId('print-button')
+        .getByRole('button')
+        .first();
+      await expect.element(printNow).toBeDisabled();
+
+      answers.release();
+      await expect.element(status()).toMatchTextContent('2 parts');
+      await expect.element(printNow).toBeEnabled();
+    } finally {
+      answers.restore();
+    }
+  });
+
+  it('meshes a queued STEP file at the tolerance shown when it was added', async () => {
+    const postMessage = vi.spyOn(Worker.prototype, 'postMessage');
+    const answers = holdWorkerAnswers();
+    try {
+      await render(PreparePanel, { props: workspace() });
+      drop(await loadFixture('block-and-peg-inch.step'));
+      await expect.poll(() => postMessage.mock.calls.length).toBe(1);
+      // The second file waits for the first, then the tolerance changes.
+      drop(await loadFixture('nist-ftc-11-ap203.stp'));
+      const tolerance = page.getByLabelText('STEP mesh (mm)', { exact: true });
+      await tolerance.fill('0.1');
+      tolerance.element().dispatchEvent(new Event('change', { bubbles: true }));
+      answers.release();
+      await expect.element(status()).toMatchTextContent('2 parts');
+
+      const sent = postMessage.mock.calls.map(
+        ([request]) => (request as { tolerance: number }).tolerance,
+      );
+      expect(sent).toEqual([STEP_TOLERANCE_MM, STEP_TOLERANCE_MM]);
+    } finally {
+      answers.restore();
+      postMessage.mockRestore();
+    }
+  });
+
+  it('keeps the notice of every file of a batch', async () => {
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: workspace() });
+    drop(
+      await loadFixture('block-and-peg-inch.step'),
+      modelFile('bracket.stl'),
+      await loadFixture('assembled.3mf'),
+    );
+    await expect
+      .element(
+        page.getByText(
+          'block-and-peg-inch.step: The 2 bodies of the STEP file are one part on the plate.',
+        ),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(/Apply any cuts made with negative volumes/u))
+      .toBeVisible();
+  });
+
+  it('names a STEP file from Storage over the size limit and shows its tolerance', async () => {
+    await render(PreparePanel, {
+      props: workspace(
+        {
+          read: () =>
+            Promise.reject(new ModelLimitError('Model exceeds 20 MiB')),
+        },
+        'local:parts/huge.step',
+      ),
+    });
+    await expect
+      .element(
+        page.getByText(/^huge\.step: The model exceeds the import limits/u),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByLabelText('STEP mesh (mm)', { exact: true }))
+      .toBeVisible();
+    // The note says when the tolerance applies, in text and not only on hover.
+    await expect
+      .element(page.getByText('for STEP files added next'))
+      .toBeVisible();
   });
 });

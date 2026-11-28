@@ -257,7 +257,7 @@
   "slicer.prepare.reading": "Reading the model…",
   "slicer.prepare.storageReadFailed": "Could not read this file from Storage. Download it, then use Open model.",
   "slicer.prepare.tolerance": "STEP mesh (mm)",
-  "slicer.prepare.toleranceHint": "The largest distance between the mesh and the surface in a STEP file. It applies to STEP files added from now on.",
+  "slicer.prepare.toleranceNote": "for STEP files added next",
   "slicer.prepare.tooDense": "At this STEP mesh tolerance it has more than 300,000 triangles. Enter a larger tolerance and add it again.",
   "slicer.prepare.tooSlow": "Reading it took longer than one minute. Enter a larger STEP mesh tolerance and add it again.",
   "slicer.prepare.view": "3D build plate view",

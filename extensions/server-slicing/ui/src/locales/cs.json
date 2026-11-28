@@ -257,7 +257,7 @@
   "slicer.prepare.reading": "Načítání modelu…",
   "slicer.prepare.storageReadFailed": "Soubor se nepodařilo načíst z úložiště. Stáhněte jej a potom použijte Otevřít model.",
   "slicer.prepare.tolerance": "Síť STEP (mm)",
-  "slicer.prepare.toleranceHint": "Největší vzdálenost mezi sítí a povrchem v souboru STEP. Platí pro soubory STEP přidané od teď.",
+  "slicer.prepare.toleranceNote": "pro další přidané soubory STEP",
   "slicer.prepare.tooDense": "Při této toleranci sítě STEP má více než 300 000 trojúhelníků. Zadejte větší toleranci a přidejte jej znovu.",
   "slicer.prepare.tooSlow": "Načítání trvalo déle než minutu. Zadejte větší toleranci sítě STEP a přidejte jej znovu.",
   "slicer.prepare.view": "3D pohled na tiskovou podložku",
