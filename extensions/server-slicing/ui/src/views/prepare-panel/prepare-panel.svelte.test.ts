@@ -156,7 +156,9 @@ describe('the build-plate workspace', () => {
     expect(api.enqueue).not.toHaveBeenCalled();
     await queue.click();
     await expect
-      .element(page.getByText('Added to the queue for Charlie at position 2'))
+      .element(
+        page.getByText('Added to the queue for Charlie', { exact: true }),
+      )
       .toBeVisible();
     await expect.element(status()).toMatchTextContent('2 prints waiting');
     expect(api.enqueue).toHaveBeenCalledExactlyOnceWith(
@@ -179,6 +181,49 @@ describe('the build-plate workspace', () => {
     await page.getByTestId('printer-picker').click();
     await page.getByRole('menuitemradio', { name: /Henry/u }).click();
     await expect.element(status()).not.toMatchTextContent('3 prints waiting');
+  });
+
+  it('rechecks a queue that was unavailable without changing the selected printer', async () => {
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording();
+    api.checkQueue.mockResolvedValueOnce('queueUnavailable');
+    await render(PreparePanel, { props: props(api, { remember }) });
+
+    const queue = page.getByRole('button', { name: 'Add to queue' });
+    await expect.element(queue).toBeDisabled();
+    await page.getByRole('button', { name: 'Retry queue check' }).click();
+    await expect.element(queue).toBeEnabled();
+    expect(api.checkQueue).toHaveBeenCalledTimes(2);
+    expect(api.checkQueue).toHaveBeenLastCalledWith(
+      'charlie',
+      expect.any(AbortSignal),
+    );
+    expect(api.enqueue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'server-slicing/PRINT_QUEUE_UNAVAILABLE',
+    'server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN',
+  ])('allows another enqueue after a transient %s refusal', async (code) => {
+    const remember = memory();
+    remember.write('plate.printer', 'charlie');
+    const api = recording({ submit: () => Promise.resolve(slicedJob) });
+    api.enqueue.mockRejectedValueOnce(
+      Object.assign(new Error('Try again'), { code, retryable: true }),
+    );
+    await render(PreparePanel, { props: props(api, { remember }) });
+
+    const queue = page.getByRole('button', { name: /Add to queue/u });
+    await expect.element(queue).toBeEnabled();
+    await queue.click();
+    await expect.element(page.getByText(code, { exact: true })).toBeVisible();
+    await expect.element(queue).toBeEnabled();
+    await queue.click();
+
+    await expect.element(status()).toMatchTextContent('2 prints waiting');
+    expect(api.enqueue).toHaveBeenCalledTimes(2);
+    expect(api.submit).toHaveBeenCalledOnce();
   });
 
   it('shows a queue refusal in the current language', async () => {

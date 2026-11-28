@@ -90,7 +90,7 @@ export const testPrepare: PrepareApi = {
   download: () => Promise.resolve(new Blob(['G28\n'])),
   print: () => Promise.resolve(),
   checkQueue: () => Promise.resolve(undefined),
-  enqueue: () => Promise.resolve({ waiting: 2, position: 2 }),
+  enqueue: () => Promise.resolve({ waiting: 2 }),
 };
 
 const START_PRINT = 'core.command.start_print';

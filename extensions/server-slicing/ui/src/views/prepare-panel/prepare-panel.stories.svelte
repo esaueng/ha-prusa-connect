@@ -90,16 +90,7 @@
   args={queueStory('queuePrinterUnknown')}
 />
 <Story name="Queue unavailable" args={queueStory('queueUnavailable')} />
-<Story
-  name="Queued at a position"
-  args={queueStory(undefined)}
-  play={enqueue}
-/>
-<Story
-  name="Queued without a position"
-  args={queueStory(undefined, () => Promise.resolve({ waiting: 1 }))}
-  play={enqueue}
-/>
+<Story name="Queued" args={queueStory(undefined)} play={enqueue} />
 <Story
   name="Queue full"
   args={queueStory(undefined, () =>

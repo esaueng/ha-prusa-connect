@@ -84,6 +84,30 @@ func TestAServiceAccountMayNotQueue(t *testing.T) {
 	r.refused(t, robot, http.MethodPost, queuePath+"/entries", bracket, routes.NotAPerson)
 }
 
+func TestAddChecksPrinterAccessBeforeValidatingTheBody(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t)
+	entries := queuePath + "/entries"
+	// Server slicing sends an empty object to check printer access without adding a file.
+	r.refused(t, carol, http.MethodPost, entries, `{}`, routes.PrinterNotFound)
+	r.refused(t, bob, http.MethodPost, entries, `{}`, routes.NotOperator)
+	r.refused(t, alice, http.MethodPost, entries, `{}`, routes.Invalid)
+
+	var view routes.View
+	if status := r.as(
+		t,
+		alice,
+		http.MethodGet,
+		queuePath,
+		"",
+		&view,
+	); status != http.StatusOK ||
+		len(view.Entries) != 0 {
+		t.Fatalf("reading the queue after the check answered %d with %d entries", status, len(view.Entries))
+	}
+}
+
 func TestOnlyAPrintFileThatIsThereIsQueued(t *testing.T) {
 	t.Parallel()
 

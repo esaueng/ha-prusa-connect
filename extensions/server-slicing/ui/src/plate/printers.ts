@@ -120,6 +120,11 @@ export type QueueBlock =
   | 'queuePrinterUnknown'
   | 'queueUnavailable';
 
+export const canRecheckQueue = (block: PrintBlock | undefined): boolean =>
+  block === 'queueUnavailable' ||
+  block === 'queuePrinterUnknown' ||
+  block === 'queueOffline';
+
 export interface PrintDecision {
   /** Print starts the file now; queue adds it to the printer's queue. */
   readonly action: 'print' | 'queue';

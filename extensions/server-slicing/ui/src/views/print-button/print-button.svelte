@@ -25,7 +25,7 @@
 
   import type { Translate } from '../../api';
   import type { FlowStep } from '../../plate/plate-flow.svelte';
-  import type { PrintDecision } from '../../plate/printers';
+  import { canRecheckQueue, type PrintDecision } from '../../plate/printers';
 
   let {
     decision,
@@ -59,9 +59,12 @@
     onSaveStl: () => void;
   } = $props();
 
-  onMount(() => {
-    const request = new AbortController();
+  const request = new AbortController();
+  const checkQueue = (): void => {
     onCheckQueue?.(request.signal);
+  };
+  onMount(() => {
+    checkQueue();
     return () => request.abort();
   });
 
@@ -118,4 +121,14 @@
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+  {#if canRecheckQueue(decision.block) && onCheckQueue}
+    <Button
+      size="field"
+      variant="ghost"
+      onclick={checkQueue}
+      aria-describedby={describedBy}
+    >
+      {t('slicer.plate.retryQueue')}
+    </Button>
+  {/if}
 </div>

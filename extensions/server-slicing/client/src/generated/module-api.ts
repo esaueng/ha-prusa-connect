@@ -705,8 +705,6 @@ export interface components {
         EnqueueResult: {
             /** @description The number of waiting entries when Print queue returns its updated queue. */
             waiting?: number;
-            /** @description The new entry’s one-based waiting position, when Print queue reports it. */
-            position?: number;
         };
     };
     responses: never;

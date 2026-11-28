@@ -16,7 +16,7 @@ import {
   type PrepareApi,
 } from '../views/prepare-panel/prepare-api';
 import type { PrintSettings } from './print-settings';
-import type { QueueBlock } from './printers';
+import { canRecheckQueue, type QueueBlock } from './printers';
 import {
   PageClosed,
   PlateChanged,
@@ -228,26 +228,24 @@ export class PlateFlow {
       if (!stillSendable(pressed, current())) throw new PlateChanged();
       this.#step = 'queueing';
       try {
-        const { waiting, position } = await this.#api.enqueue(
+        const { waiting } = await this.#api.enqueue(
           job.id,
           printer.id,
           this.#signal,
         );
         this.#live();
         this.#waiting = { ...this.#waiting, [printer.id]: waiting };
-        this.#notice =
-          position === undefined
-            ? {
-                key: 'slicer.plate.notice.queued',
-                params: { printer: printer.name },
-              }
-            : {
-                key: 'slicer.plate.notice.queuedAt',
-                params: { printer: printer.name, position },
-              };
+        this.#notice = {
+          key: 'slicer.plate.notice.queued',
+          params: { printer: printer.name },
+        };
       } catch (error) {
         const block = queueBlockOf(describeFault(error).code);
-        if (block !== undefined && this.#queue?.printer === printer.id)
+        if (
+          block !== undefined &&
+          !canRecheckQueue(block) &&
+          this.#queue?.printer === printer.id
+        )
           this.#queue = { printer: printer.id, block };
         throw error;
       }

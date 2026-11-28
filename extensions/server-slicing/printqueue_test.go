@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -58,6 +59,12 @@ func TestEnqueueRelaysTheFinishedFileAsTheJobOwner(t *testing.T) {
 	t.Parallel()
 	r := newRig(t)
 	done := finishedSlice(t, r)
+	// This is the Print queue handler's 201 response with fixed IDs and timestamps.
+	queueView, readErr := os.ReadFile("testdata/print-queue-created.json")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
 	wire := queueWire(func(_ context.Context, method wirerpc.Method, params any) (json.RawMessage, error) {
 		t.Helper()
 
@@ -76,18 +83,34 @@ func TestEnqueueRelaysTheFinishedFileAsTheJobOwner(t *testing.T) {
 			t.Fatalf("relay file: %+v, error: %v", file, err)
 		}
 
-		return json.Marshal(routesapi.Response{Status: http.StatusCreated,
-			Body: []byte(`{"entries":[{"state":"printing"},{"state":"waiting"},{"state":"waiting"}],"position":2}`)})
+		return json.Marshal(routesapi.Response{Status: http.StatusCreated, Body: queueView})
 	})
 	r = r.withPrintQueue(routesapi.NewClient(wire))
 
-	var enqueued struct {
-		Waiting  int `json:"waiting"`
-		Position int `json:"position"`
-	}
+	var enqueued map[string]int
 	status := r.as(t, alice, http.MethodPost, "/jobs/"+done.ID+"/enqueue", []byte(`{"device_id":"mk4"}`), &enqueued)
-	if status != http.StatusCreated || enqueued.Waiting != 2 || enqueued.Position != 2 {
+	if status != http.StatusCreated || len(enqueued) != 1 || enqueued["waiting"] != 2 {
 		t.Fatalf("enqueue answered %d %+v", status, enqueued)
+	}
+}
+
+func TestTheEnqueueResultDescribesOnlyTheWaitingCount(t *testing.T) {
+	t.Parallel()
+
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openAPI, &document); err != nil {
+		t.Fatal(err)
+	}
+
+	properties := document.Components.Schemas["EnqueueResult"].Properties
+	if _, waiting := properties["waiting"]; len(properties) != 1 || !waiting {
+		t.Fatalf("the enqueue response must describe just the waiting count, got %d properties", len(properties))
 	}
 }
 

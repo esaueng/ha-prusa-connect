@@ -155,7 +155,7 @@ finished print, shows **Add to queue** instead. Install and enable the Print
 queue module and approve the call from Server slicing to use this button.
 Your account needs permission to operate Print queue and the printer and to
 read the storage that holds the G-code. After you add a file, Slicing shows
-the waiting count and the file's position if Print queue reports it.
+how many prints are waiting.
 
 The menu beside the button slices without printing, downloads the G-code,
 or saves the placed STL. A saved STL keeps its position when it is opened again.
@@ -326,7 +326,7 @@ takes `operate_resource`, which a token with the `operate` scope reaches.
 Send `{"device_id":"mk4"}` to `POST /jobs/{id}/enqueue`. The job must belong
 to the caller and have a finished print file. Slicing sends the file's storage
 and path to Print queue as the caller. A successful response has status `201`
-and includes the waiting count and position when available. The availability
+and includes the waiting count when available. The availability
 check returns `204` when the caller may add a file. Queue space and access to
 the file are checked when it is added.
 

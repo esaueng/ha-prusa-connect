@@ -1109,11 +1109,6 @@
             "type": "integer",
             "minimum": 0,
             "description": "The number of waiting entries when Print queue returns its updated queue."
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "The new entry’s one-based waiting position, when Print queue reports it."
           }
         }
       }

@@ -31,8 +31,7 @@ type enqueueBody struct {
 }
 
 type enqueueResult struct {
-	Waiting  *int `json:"waiting,omitempty"`
-	Position *int `json:"position,omitempty"`
+	Waiting *int `json:"waiting,omitempty"`
 }
 
 func (s Service) enqueue(w http.ResponseWriter, r *http.Request, state State, by string) {
@@ -93,8 +92,8 @@ func (s Service) checkPrintQueue(w http.ResponseWriter, r *http.Request, _ State
 		return
 	}
 
-	// The enqueue route checks access to the printer before it requires a file
-	// path. An empty object reaches that validation and cannot add an entry.
+	// Print queue's OpenAPI puts the printer access check before body validation.
+	// An empty object reaches that validation and cannot add an entry.
 	response, fault := s.callPrintQueue(r, by, device, []byte(`{}`))
 	if fault.Name != "" {
 		refuse(w, fault, fault.Title)
@@ -175,7 +174,6 @@ func printQueueResult(body []byte) enqueueResult {
 		Entries []struct {
 			State string `json:"state"`
 		} `json:"entries"`
-		Position int `json:"position"`
 	}
 	// The 201 confirms the write even when this module cannot read the optional queue view.
 	if err := json.Unmarshal(body, &view); err != nil {
@@ -192,9 +190,5 @@ func printQueueResult(body []byte) enqueueResult {
 		}
 		result.Waiting = &waiting
 	}
-	if view.Position > 0 {
-		result.Position = &view.Position
-	}
-
 	return result
 }
