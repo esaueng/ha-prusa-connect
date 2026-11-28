@@ -7,6 +7,7 @@ import {
   MAX_TRIANGLES,
   ModelLimitError,
 } from './import-limits';
+import { stepReader } from './import-step';
 import { stlReader } from './import-stl';
 
 /** A triangle mesh in millimetres, optionally placed by an affine matrix. */
@@ -19,21 +20,41 @@ export interface ImportedMesh {
   parts: readonly MeshPart[];
   /** Use the file's position as the initial position on the plate. */
   preservePlacement: boolean;
+  /** How many separate bodies the file held, when the format says. */
+  bodies?: number;
+}
+
+export interface ImportOptions {
+  /**
+   * The largest distance between the mesh and the exact surface, in mm, for a
+   * format that stores exact surfaces. A mesh format ignores it.
+   */
+  tolerance?: number;
+  /** Stops a read that runs off the page, such as a STEP read in a worker. */
+  signal?: AbortSignal;
 }
 
 /** Register by extension. Check the byte signature before decoding the file. */
 export interface MeshReader {
   matches(bytes: Uint8Array): boolean;
   /** Transfers ownership of the returned geometries to Prepare. */
-  read(bytes: Uint8Array): ImportedMesh | Promise<ImportedMesh>;
+  read(
+    bytes: Uint8Array,
+    options?: ImportOptions,
+  ): ImportedMesh | Promise<ImportedMesh>;
 }
 
 const readers = new Map<string, MeshReader>([
   ['stl', stlReader],
   ['3mf', threeMFReader],
+  ['step', stepReader],
+  ['stp', stepReader],
 ]);
 
-export const readMeshFile = async (file: File): Promise<ImportedMesh> => {
+export const readMeshFile = async (
+  file: File,
+  options: ImportOptions = {},
+): Promise<ImportedMesh> => {
   if (file.size > MAX_MODEL_BYTES)
     throw new ModelLimitError('Model exceeds 20 MiB');
   const extension = /\.([^.]+)$/u.exec(file.name)?.[1]?.toLowerCase();
@@ -42,7 +63,7 @@ export const readMeshFile = async (file: File): Promise<ImportedMesh> => {
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!reader.matches(bytes)) throw new Error('Model signature does not match');
-  return reader.read(bytes);
+  return reader.read(bytes, options);
 };
 
 const validCoordinate = (value: number): boolean =>

@@ -11,7 +11,7 @@
     type FaultText,
     type MessageParams,
   } from '@prusa/connect-ui/i18n';
-  import { FaultAlert, Input } from '@prusa/connect-ui/primitives';
+  import { FaultAlert, Input, Label } from '@prusa/connect-ui/primitives';
   import type { Device } from '@prusa/connect-ui/domain';
   import { parseFileRef } from '@prusa/connect-ui/slots';
   import { onMount, untrack } from 'svelte';
@@ -44,6 +44,11 @@
   import { PrintSettingsMenu } from '../print-settings';
   import { PrinterPicker } from '../printer-picker';
   import { ModelLimitError } from './import-limits';
+  import {
+    STEP_TOLERANCE_MM,
+    StepError,
+    StepMeshLimitError,
+  } from './import-step';
   import { readMeshFile } from './mesh-import';
   import type { Destination, PrepareApi } from './prepare-api';
   import { ThreeMFRoleError } from './three-mf-roles';
@@ -81,7 +86,7 @@
   } = $props();
 
   // The file types the readers in mesh-import.ts take.
-  const ACCEPT = '.stl,.3mf';
+  const ACCEPT = '.stl,.3mf,.step,.stp';
 
   const id = $props.id();
   const controller = new AbortController();
@@ -99,6 +104,10 @@
   let reads: Promise<void> = Promise.resolve();
   const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
+  /** The STEP mesh tolerance for files added from now on, in mm. */
+  let tolerance = $state(STEP_TOLERANCE_MM);
+  /** A STEP file was added or refused, so its tolerance is shown. */
+  let stepUsed = $state(false);
   let notice = $state<{ key: string; params: MessageParams }>();
   let destinations = $state.raw<Destination[]>([]);
   let destinationFault = $state<FaultText>();
@@ -267,7 +276,12 @@
         if (closed()) return;
         reading = false;
         name = loaded.name;
-        const imported = await readMeshFile(loaded);
+        stepUsed ||= isStep(loaded.name);
+        // The workspace's signal stops a STEP worker when the page closes.
+        const imported = await readMeshFile(loaded, {
+          tolerance,
+          signal: controller.signal,
+        });
         if (closed()) {
           for (const part of imported.parts) part.geometry.dispose();
           return;
@@ -282,9 +296,14 @@
           continue;
         }
         threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
+        if (imported.bodies !== undefined && imported.bodies > 1)
+          notice = {
+            key: 'slicer.prepare.bodies',
+            params: { count: imported.bodies },
+          };
       } catch (error) {
         if (closed()) return;
-        const reason = t(faultKey(error, reading));
+        const reason = reasonOf(error, reading);
         faults.push(
           name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
         );
@@ -292,6 +311,30 @@
     }
     if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
     if (threeMF) notice = { key: 'slicer.prepare.geometryOnly', params: {} };
+  };
+
+  const isStep = (name: string): boolean => /\.(?:step|stp)$/iu.test(name);
+
+  const reasonOf = (error: unknown, reading: boolean): string => {
+    if (error instanceof StepError)
+      return error.reason === 'empty'
+        ? t('slicer.prepare.noSolids')
+        : t('slicer.prepare.badStep', { reason: error.message });
+    if (error instanceof StepMeshLimitError)
+      return t(
+        error.reason === 'time'
+          ? 'slicer.prepare.tooSlow'
+          : 'slicer.prepare.tooDense',
+      );
+    return t(faultKey(error, reading));
+  };
+
+  const changeTolerance = (event: Event): void => {
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const input = event.currentTarget;
+    if (Number.isFinite(input.valueAsNumber) && input.validity.valid)
+      tolerance = input.valueAsNumber;
+    else input.value = String(tolerance);
   };
 
   const faultKey = (error: unknown, reading: boolean): string => {
@@ -530,6 +573,28 @@
     onCopy={copy}
   >
     {#snippet trailing()}
+      {#if stepUsed}
+        <div class="flex items-center gap-2" data-part="step-tolerance">
+          <Label for="{id}-tolerance"
+            ><span class="whitespace-nowrap"
+              >{t('slicer.prepare.tolerance')}</span
+            ></Label
+          >
+          <!-- The input fills its box, so the box sets its width. -->
+          <div class="w-20">
+            <Input
+              id="{id}-tolerance"
+              type="number"
+              min="0.001"
+              max="1"
+              step="any"
+              title={t('slicer.prepare.toleranceHint')}
+              value={tolerance}
+              onchange={changeTolerance}
+            />
+          </div>
+        </div>
+      {/if}
       <PrinterPicker {printers} chosen={printer?.id} {t} onChoose={choose} />
       <PrintSettingsMenu
         {choices}
