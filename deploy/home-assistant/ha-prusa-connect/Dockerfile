@@ -7,6 +7,9 @@ RUN groupadd --gid 10001 prusa \
 LABEL org.opencontainers.image.source="https://github.com/esaueng/ha-prusa-connect"
 COPY --chmod=0755 rootfs/prusa_connect /prusa_connect
 COPY --chmod=0644 rootfs/etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY rootfs/opt/modules/buddy3d-camera /opt/modules/buddy3d-camera
+RUN chmod -R u=rwX,go=rX /opt/modules/buddy3d-camera \
+    && chmod 0755 /opt/modules/buddy3d-camera/buddy3d-camera_linux_*
 COPY --chmod=0644 server.yaml /usr/local/share/ha-prusa-connect/server.yaml
 COPY --chmod=0755 run.sh /usr/local/bin/ha-prusa-connect
 

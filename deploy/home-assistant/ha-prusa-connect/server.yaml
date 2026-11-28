@@ -1,4 +1,6 @@
 core:
+  modules_local:
+    github.com/prusa3d/buddy3d-camera: /opt/modules/buddy3d-camera
   discovery:
     enabled: false
   upgrade:

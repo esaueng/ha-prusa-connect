@@ -26,8 +26,11 @@ if ! ruby -ryaml -e '
   echo 'The Home Assistant app archive must enable host networking for live cameras.' >&2
   exit 1
 fi
-# Copying the app over Samba can remove the binary's execute bit.
+# Copying the app to the host can change the archive's file modes.
 chmod 0644 "$work/ha-prusa-connect/rootfs/prusa_connect"
+buddy3d_bundle="$work/ha-prusa-connect/rootfs/opt/modules/buddy3d-camera"
+chmod -R u=rwX,go= "$buddy3d_bundle"
+chmod 0600 "$buddy3d_bundle"/buddy3d-camera_linux_*
 cat > "$work/compose.yaml" <<'YAML'
 services:
   ha-prusa-connect:
@@ -91,6 +94,35 @@ sign_in() {
     --data-binary "$login" "$origin/api/v1/auth/login" >/dev/null
 }
 sign_in
+buddy3d_module=github.com/prusa3d/buddy3d-camera
+buddy3d_source=/opt/modules/buddy3d-camera
+buddy3d_namespace=com.github.aux.prusa3d.buddy3d-camera
+# Buddy3D is offered by the app even with the marketplace disabled.
+curl -fsS -b "$work/cookies" -X PUT -H 'Content-Type: application/json' \
+  --data-binary '{"enabled":false}' "$origin/api/v1/modules/marketplace" >/dev/null
+buddy3d_install=$(
+  curl -fsS -b "$work/cookies" "$origin/api/v1/modules/index" |
+    jq -ec --arg module "$buddy3d_module" --arg source "$buddy3d_source" '
+      .items[] | select(.module == $module and .source == $source and .installed == false and
+        any(.listen[]; .name == "camera" and .network == "tcp" and .port == 9443)) |
+      {module,version,from:.source,approve:true,approve_listen:true,settings:{address:"127.0.0.1"}}
+    '
+)
+printf '%s\n' "$buddy3d_install" |
+  curl -fsS -b "$work/cookies" -H 'Content-Type: application/json' \
+    --data-binary @- "$origin/api/v1/modules" |
+  jq -ec 'select(.running == true and .state == "ready") | {namespace,version,state}'
+
+check_buddy3d() {
+  curl -fsS --retry 10 --retry-delay 1 -b "$work/cookies" \
+    "$origin/api/v1/modules/$buddy3d_namespace/ui/ui/index.js" -o "$work/buddy3d.js"
+  test -s "$work/buddy3d.js"
+  curl -fsS -b "$work/cookies" "$origin/api/v1/camera-types" |
+    jq -e --arg type "$buddy3d_namespace/buddy3d" 'any(.items[]; .type == $type)' >/dev/null
+  compose exec -T ha-prusa-connect bash -ec 'exec 3<>/dev/tcp/127.0.0.1/9443'
+}
+check_buddy3d
+
 printf 'G28\n' > "$work/sample.gcode"
 # Storage can still be starting after required modules are ready.
 curl -fsS --retry 10 --retry-delay 1 -b "$work/cookies" \
@@ -109,6 +141,7 @@ test -n "$token"
 start_app --force-recreate
 wait_for_setup 'done'
 sign_in
+check_buddy3d
 curl -fsS --retry 10 --retry-delay 1 -b "$work/cookies" \
   "$origin/api/v1/storages/local/content?path=sample.gcode" -o "$work/reloaded.gcode"
 cmp "$work/sample.gcode" "$work/reloaded.gcode"
