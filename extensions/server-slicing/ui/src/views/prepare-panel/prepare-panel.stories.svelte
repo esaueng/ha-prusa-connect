@@ -26,14 +26,14 @@
 <Story name="Empty build plate" />
 <Story name="STL from Storage" args={{ source: 'local:bracket.stl' }} />
 <Story
-  name="3MF assembly"
+  name="Assembly from 3MF"
   args={{
     source: 'local:assembled.3mf',
     api: { ...testPrepare, read: assembledFile },
   }}
 />
 <Story
-  name="3MF exceeds import limits"
+  name="Import limit for 3MF"
   args={{
     source: 'local:large-archive.3mf',
     api: { ...testPrepare, read: () => loadFixture('large-archive.3mf') },
