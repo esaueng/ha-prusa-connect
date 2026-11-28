@@ -145,8 +145,9 @@ one.
 the G-code to an idle printer, which starts it. Once the plate is sliced, the
 button shows the print time from the G-code. A change to the plate or to the
 settings slices it again. The plate, its settings, the printer and its bed
-may change while the plate is sliced. When any of them did, or a part no
-longer fits, nothing is sent and the plate says so. Nothing is sent after the
+may change while the plate is sliced. When any of them did, the printer
+started another print, or a part no longer fits, nothing is sent and the plate
+says so. The same check runs again right before the print starts. Nothing is sent after the
 page is closed. A printer that is printing, or that still holds a
 finished print, shows **Add to queue** instead. That button is off for now:
 the queue belongs to the Print queue module, and this module has no approved

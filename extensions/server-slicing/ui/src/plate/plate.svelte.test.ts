@@ -505,6 +505,33 @@ describe('the plate revision', () => {
   });
 });
 
+describe('a change that changes nothing', () => {
+  it('moves the revision on and records Undo only when the plate changed', () => {
+    const plate = plateOf();
+    // Added with no placement, so it already stands where Arrange puts it.
+    plate.add(
+      { parts: [{ geometry: box(10, 20, 30) }], preservePlacement: false },
+      'a.stl',
+    );
+    plate.selectAll();
+    const before = plate.revision;
+
+    plate.beginMove();
+    plate.moveBy(0, 0);
+    plate.endMove();
+    expect(plate.revision).toBe(before);
+
+    expect(plate.arrange('all')).toBe(0);
+    expect(plate.revision).toBe(before);
+
+    // Undo holds the adding and nothing after it.
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(plate.canUndo).toBe(false);
+    plate.dispose();
+  });
+});
+
 describe('Undo during a drag', () => {
   it('ends the drag, so the part Undo removed does not come back', () => {
     const plate = plateOf();

@@ -9,12 +9,8 @@ import {
   testPrepare,
 } from '../views/prepare-panel/prepare-fixtures';
 import type { PrepareApi } from '../views/prepare-panel/prepare-api';
-import {
-  PlateFlow,
-  type PlateInput,
-  type PrintState,
-  signatureOf,
-} from './plate-flow.svelte';
+import { PlateFlow, type PlateInput, signatureOf } from './plate-flow.svelte';
+import { type SendSnapshot } from './sendable';
 
 const geometry = new BoxGeometry(10, 20, 30);
 
@@ -41,16 +37,17 @@ const running: Job = { ...placedJob, state: 'running', progress: 40 };
 const henryPrinter = { id: 'henry', name: 'Henry' };
 
 /** The plate and the printer as they were when Print was pressed. */
-const unchangedFor = (input: PlateInput) => (): PrintState => ({
-  key: signatureOf(input),
+const unchangedFor = (input: PlateInput) => (): SendSnapshot => ({
+  plate: signatureOf(input),
   printer: 'henry',
-  printable: true,
+  action: 'print',
+  sendable: true,
 });
 
 /** Answers `first` when Print is pressed and `then` every time after. */
-const changingTo = (first: PrintState, then: PrintState) => {
+const changingTo = (first: SendSnapshot, then: SendSnapshot) => {
   let reads = 0;
-  return (): PrintState => (reads++ === 0 ? first : then);
+  return (): SendSnapshot => (reads++ === 0 ? first : then);
 };
 
 /** An API that answers like the fixtures and records each call. */
@@ -98,6 +95,7 @@ describe('slicing and printing the plate', () => {
         name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
       },
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     expect(flow.notice).toEqual({
       key: 'slicer.plate.notice.printing',
@@ -166,18 +164,20 @@ describe('slicing and printing the plate', () => {
     expect(flow.step).toBe('idle');
   });
 
-  it('sends nothing when the plate, its bed, the printer or the fit changed during the slice', async () => {
-    const pressed: PrintState = {
-      key: signatureOf(inputOf()),
+  it('sends nothing when the plate, its bed, the printer, its state or the fit changed during the slice', async () => {
+    const pressed: SendSnapshot = {
+      plate: signatureOf(inputOf()),
       printer: 'henry',
-      printable: true,
+      action: 'print',
+      sendable: true,
     };
     for (const now of [
-      { ...pressed, key: signatureOf(inputOf(60)) },
-      { ...pressed, key: signatureOf(inputOf(50, { walls: 4 })) },
-      { ...pressed, key: `${pressed.key} on a 100 × 100 bed` },
+      { ...pressed, plate: signatureOf(inputOf(60)) },
+      { ...pressed, plate: signatureOf(inputOf(50, { walls: 4 })) },
+      { ...pressed, plate: `${pressed.plate} on a 100 × 100 bed` },
+      { ...pressed, action: 'queue' as const },
       { ...pressed, printer: 'xl' },
-      { ...pressed, printable: false },
+      { ...pressed, sendable: false },
     ]) {
       const api = recording();
       const flow = new PlateFlow(api, new AbortController().signal, 1);

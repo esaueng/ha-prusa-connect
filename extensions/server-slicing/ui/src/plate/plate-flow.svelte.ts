@@ -15,6 +15,13 @@ import {
   type PrepareApi,
 } from '../views/prepare-panel/prepare-api';
 import type { PrintSettings } from './print-settings';
+import {
+  PageClosed,
+  PlateChanged,
+  type SendGuard,
+  type SendSnapshot,
+  stillSendable,
+} from './sendable';
 
 /** How often a running job is read again. */
 export const JOB_POLL_MS = 1000;
@@ -35,16 +42,6 @@ export interface PlateInput {
   readonly storage: string;
   readonly profile: string;
   readonly settings: PrintSettings | undefined;
-}
-
-/**
- * What Print compares between pressing it and sending the G-code: a key for
- * the plate, its settings and its bed, the printer, and whether the plate fits.
- */
-export interface PrintState {
-  readonly key: string;
-  readonly printer: string | undefined;
-  readonly printable: boolean;
 }
 
 /** A sentence the page shows once a step has ended, as a catalogue key. */
@@ -153,32 +150,27 @@ export class PlateFlow {
 
   /**
    * Slices the plate if it changed, then sends it to an idle printer and
-   * starts it. Saving and slicing take a while, and the person may change the
-   * plate, its settings, the bed or the printer meanwhile. `current` answers
-   * them as they are now. It is read when Print is pressed and again before
-   * the G-code is sent; when anything differs, or the plate no longer fits,
-   * nothing is sent and the notice says so.
+   * starts it. `current` answers the plate and the printer as they are now.
+   * It is read when Print is pressed, and the guard the service gets compares
+   * it again after every wait, before anything is sent. When the plate, its
+   * settings, the bed or the printer changed, or the printer no longer takes
+   * the plate, nothing is sent and the notice says so.
    */
   async print(
     input: PlateInput,
     printer: { id: string; name: string },
-    current: () => PrintState,
+    current: () => SendSnapshot,
   ): Promise<boolean> {
     const pressed = current();
+    const guard: SendGuard = () => {
+      this.#live();
+      if (!stillSendable(pressed, current())) throw new PlateChanged();
+    };
     const ok = await this.#run(async () => {
       const job = await this.#slicedJob(input);
       const result = job.result;
       if (!result) throw new Error('The job wrote no G-code');
-      this.#live();
-      const now = current();
-      if (
-        now.key !== pressed.key ||
-        now.printer !== printer.id ||
-        !now.printable
-      ) {
-        this.#notice = { key: 'slicer.plate.notice.changed', params: {} };
-        return false;
-      }
+      guard();
       this.#step = 'sending';
       await this.#api.print(
         {
@@ -188,6 +180,7 @@ export class PlateFlow {
           name: result.path.split('/').at(-1) ?? result.path,
         },
         this.#signal,
+        guard,
       );
       this.#live();
       this.#notice = {
@@ -216,7 +209,7 @@ export class PlateFlow {
 
   /** Stops the step once the workspace has closed, before anything else is sent. */
   #live(): void {
-    if (this.#signal.aborted) throw new Error('The workspace closed');
+    if (this.#signal.aborted) throw new PageClosed();
   }
 
   async #run<T>(work: () => Promise<T>): Promise<T | undefined> {
@@ -226,7 +219,10 @@ export class PlateFlow {
     try {
       return await work();
     } catch (thrown) {
-      if (!this.#signal.aborted) this.#fault = describeFault(thrown);
+      if (this.#signal.aborted) return undefined;
+      if (thrown instanceof PlateChanged)
+        this.#notice = { key: 'slicer.plate.notice.changed', params: {} };
+      else this.#fault = describeFault(thrown);
       return undefined;
     } finally {
       if (!this.#signal.aborted) this.#step = 'idle';

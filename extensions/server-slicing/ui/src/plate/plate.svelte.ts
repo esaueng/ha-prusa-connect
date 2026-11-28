@@ -37,6 +37,24 @@ export const SCALE_PERCENT = { min: 1, max: 1000 } as const;
 /** Why parts were not added. */
 export type AddRefusal = 'tooManyTriangles';
 
+/** True when two lists hold the same parts, standing in the same way. */
+const samePlate = (a: readonly Part[], b: readonly Part[]): boolean =>
+  a.length === b.length &&
+  a.every((part, at) => {
+    const other = b[at];
+    return (
+      other !== undefined &&
+      (part === other ||
+        (part.id === other.id &&
+          part.geometry === other.geometry &&
+          part.x === other.x &&
+          part.y === other.y &&
+          part.z === other.z &&
+          part.scale === other.scale &&
+          part.rotation.equals(other.rotation)))
+    );
+  });
+
 /** Two parts whose boxes overlap in all three directions. */
 const collide = (a: Part, b: Part): boolean => {
   const ra = footprintOf(a);
@@ -310,8 +328,7 @@ export class Plate {
 
   remove(): void {
     if (this.#selected.length === 0) return;
-    this.#record();
-    this.#setParts(
+    this.#commit(
       this.#parts.filter((part) => !this.#selected.includes(part.id)),
     );
     this.#selected = [];
@@ -325,8 +342,7 @@ export class Plate {
       part.rotation,
       faceNormal(part.geometry, face),
     );
-    this.#record();
-    this.#setParts(
+    this.#commit(
       this.#parts.map((one) => (one.id === id ? rotated(one, rotation) : one)),
     );
   }
@@ -350,8 +366,7 @@ export class Plate {
     // A part with no room would stay where it is, under the spot another
     // part was moved to, so nothing moves unless every part has room.
     if (unplaced.length > 0) return unplaced.length;
-    this.#record();
-    this.#setParts(
+    this.#commit(
       this.#parts.map((part) => {
         const at = placed.get(part.id);
         return at ? { ...part, x: at[0], y: at[1], z: 0 } : part;
@@ -422,8 +437,7 @@ export class Plate {
   }
 
   #change(turn: (part: Part) => Part): void {
-    this.#record();
-    this.#setParts(
+    this.#commit(
       this.#parts.map((part) =>
         this.#selected.includes(part.id) ? turn(part) : part,
       ),
@@ -434,7 +448,16 @@ export class Plate {
     this.#push(this.#parts);
   }
 
+  /** Records the plate for Undo and replaces its parts, when anything changed. */
+  #commit(parts: readonly Part[]): void {
+    if (samePlate(parts, this.#parts)) return;
+    this.#record();
+    this.#setParts(parts);
+  }
+
+  /** Replaces the parts and moves the revision on, unless nothing changed. */
   #setParts(parts: readonly Part[]): void {
+    if (samePlate(parts, this.#parts)) return;
     this.#parts = parts;
     this.#revision += 1;
   }

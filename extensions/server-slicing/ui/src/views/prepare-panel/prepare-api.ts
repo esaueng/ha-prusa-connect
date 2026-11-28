@@ -8,6 +8,7 @@ import { parseFileRef, type ModuleHost } from '@prusa/connect-ui/slots';
 
 import type { Job, SlicerApi } from '../../api';
 import type { PrintSettings } from '../../plate/print-settings';
+import type { SendGuard } from '../../plate/sendable';
 import { MAX_MODEL_BYTES, ModelLimitError } from './import-limits';
 
 export const placedName = (fileName: string): string => {
@@ -68,9 +69,14 @@ export interface PrepareApi {
   ) => Promise<Blob>;
   /**
    * Sends the G-code to an idle printer and starts it. A refusal throws.
-   * Nothing is sent once the signal has aborted.
+   * `guard` runs after every wait, right before the next request, and throws
+   * when the page closed or the plate may no longer be sent.
    */
-  readonly print: (request: PrintRequest, signal: AbortSignal) => Promise<void>;
+  readonly print: (
+    request: PrintRequest,
+    signal: AbortSignal,
+    guard: SendGuard,
+  ) => Promise<void>;
 }
 
 const readFile = async (response: Response, name: string): Promise<File> => {
@@ -154,9 +160,10 @@ export const prepareOn = (
     );
     return response.blob();
   },
-  // The library's printStoredFile takes no signal, so its two steps are
-  // written out here: a closed page must not start a print after the lookup.
-  async print({ deviceId, storage, source, name }, signal) {
+  // The library's printStoredFile takes no guard, so its two steps are written
+  // out here: the guard runs after the lookup, right before the print starts.
+  async print({ deviceId, storage, source, name }, signal, guard) {
+    guard();
     const page = await readDeviceStorages(client, deviceId, {
       refresh: true,
       signal,
@@ -164,8 +171,8 @@ export const prepareOn = (
     const path = page.reported
       ? landingPathOf(page.items ?? [], name)
       : undefined;
+    guard();
     if (path === undefined) throw new NoPrinterStorage(deviceId, page.reported);
-    if (signal.aborted) throw new Error('The workspace closed');
     const outcome = await printFile(client, {
       deviceId,
       path,

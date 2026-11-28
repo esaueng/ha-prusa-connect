@@ -145,7 +145,7 @@ export const decidePrint = (
     printer && LATER.has(printer.state)
       ? ('queue' as const)
       : ('print' as const);
-  const block = plateBlockOf(plate) ?? printerBlock(printer, queue);
+  const block = plateBlockOf(plate) ?? printerBlockOf(printer, queue);
   return { action, block };
 };
 
@@ -160,7 +160,8 @@ export const plateBlockOf = (plate: PlateReadiness): PrintBlock | undefined => {
   return undefined;
 };
 
-const printerBlock = (
+/** Why the printer cannot take the plate now, whatever the plate is. */
+export const printerBlockOf = (
   printer: PrinterChoice | undefined,
   queue: boolean,
 ): PrintBlock | undefined => {

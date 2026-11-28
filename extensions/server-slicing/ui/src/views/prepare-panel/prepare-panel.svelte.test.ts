@@ -4,11 +4,12 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { page, userEvent } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import type { ModuleHost } from '@prusa/connect-ui/slots';
 
 import { t } from '../../test/fakes';
 import { makeSTL } from './model';
 import type { Job } from '../../api';
-import type { PrepareApi } from './prepare-api';
+import { type PrepareApi, prepareOn } from './prepare-api';
 import {
   assembledFile,
   bed,
@@ -91,6 +92,7 @@ describe('the build-plate workspace', () => {
         name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
       },
       expect.any(AbortSignal),
+      expect.any(Function),
     );
     // The time comes from the finished slice of this plate.
     await expect
@@ -497,5 +499,149 @@ describe('what the re-check found', () => {
 
     await expect.element(status()).toMatchTextContent('2 parts');
     expect(page.getByRole('alert').elements()).toHaveLength(0);
+  });
+});
+
+describe('what the second re-check found', () => {
+  it('starts nothing when the bed shrinks while the printer’s storages are read', async () => {
+    let storages: (page: unknown) => void = () => undefined;
+    const printDeviceFile = vi.fn(() =>
+      Promise.resolve({
+        command: { command_id: 'c1', ok: true },
+        path: 'usb/a.gcode',
+      }),
+    );
+    const client = {
+      listDeviceStorages: () =>
+        new Promise((resolve) => {
+          storages = resolve;
+        }),
+      printDeviceFile,
+    };
+    const api: PrepareApi = {
+      ...prepareOn(
+        // The print path calls these two operations of the client and no other.
+        client as unknown as ModuleHost['client'],
+        {
+          submitJob: () => Promise.resolve(placedJob),
+          readJob: () => Promise.resolve(slicedJob),
+        },
+      ),
+      destinations: testPrepare.destinations,
+      read: testPrepare.read,
+      save: testPrepare.save,
+    };
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    await expect
+      .element(page.getByTestId('print-button'))
+      .toMatchTextContent('Sending');
+    const small = {
+      ...henry,
+      build_volume: { x_mm: 100, y_mm: 100, z_mm: 20 },
+    };
+    await screen.rerender({ devices: [small, charlie, xl] });
+    await expect.element(status()).toMatchTextContent('bed 100 × 100 mm');
+
+    storages({
+      reported: true,
+      items: [
+        {
+          name: 'usb',
+          mountpoint: '/usb',
+          read_only: false,
+          type: 'USB',
+          free_space: 1,
+        },
+      ],
+    });
+    await expect
+      .element(page.getByText(/The plate changed while it was sliced/u))
+      .toBeVisible();
+    expect(printDeviceFile).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing when the printer starts printing while the plate is sliced', async () => {
+    // Henry is chosen, so only its state changes when it starts printing.
+    const remember = memory();
+    remember.write('plate.printer', 'henry');
+    let finish: (job: Job) => void = () => undefined;
+    const api = recording({
+      submit: () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, {
+      props: props(api, { remember }),
+    });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+    const busy = { ...henry, state: { ...henry.state, '/state': 'PRINTING' } };
+    await screen.rerender({ devices: [busy, charlie, xl] });
+
+    await expect
+      .element(page.getByTestId('printer-picker'))
+      .toMatchTextContent('Henry');
+
+    finish(placedJob);
+    await expect
+      .element(page.getByText(/The plate changed while it was sliced/u))
+      .toBeVisible();
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  it('keeps the printer Print was pressed for when the list reorders', async () => {
+    const api = recording({
+      submit: () => new Promise<Job>(() => undefined),
+    });
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+
+    // Henry starting a print would put Xavier first in the list.
+    const busy = { ...henry, state: { ...henry.state, '/state': 'PRINTING' } };
+    await screen.rerender({ devices: [busy, charlie, xl] });
+    await expect
+      .element(page.getByTestId('printer-picker'))
+      .toMatchTextContent('Henry');
+  });
+
+  it('reads no queued file once the workspace has closed', async () => {
+    let read: (file: File) => void = () => undefined;
+    const api = recording({
+      read: () =>
+        new Promise<File>((resolve) => {
+          read = resolve;
+        }),
+    });
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, { props: props(api) });
+    await expect.poll(() => api.read.mock.calls.length).toBe(1);
+
+    const queued = modelFile('queued.stl');
+    const opened = vi.spyOn(queued, 'arrayBuffer');
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(queued);
+    page
+      .getByLabelText('3D build plate view')
+      .element()
+      .dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+    await screen.unmount();
+    const stored = modelFile('from-storage.stl');
+    const storedOpened = vi.spyOn(stored, 'arrayBuffer');
+    read(stored);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(storedOpened).not.toHaveBeenCalled();
+    expect(opened).not.toHaveBeenCalled();
   });
 });

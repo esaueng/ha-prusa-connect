@@ -18,13 +18,10 @@
 
   import type { STLBed, Translate } from '../../api';
   import { footprintOf, worldMatrix } from '../../plate/part';
-  import {
-    PlateFlow,
-    type PrintState,
-    signatureOf,
-  } from '../../plate/plate-flow.svelte';
+  import { PlateFlow, signatureOf } from '../../plate/plate-flow.svelte';
   import { plateScene, type PlateScene } from '../../plate/plate-scene';
   import { Plate } from '../../plate/plate.svelte';
+  import type { SendSnapshot } from '../../plate/sendable';
   import {
     checkedSettings,
     choicesKey,
@@ -38,6 +35,7 @@
   import {
     decidePrint,
     plateBlockOf,
+    printerBlockOf,
     printerChoicesOf,
   } from '../../plate/printers';
   import { PlateStatus } from '../plate-status';
@@ -236,20 +234,26 @@
     return read;
   };
 
+  /** True once the workspace closed. A function, so each wait reads it anew. */
+  const closed = (): boolean => controller.signal.aborted;
+
   const readBatch = async (
     files: readonly (Promise<File> | File)[],
   ): Promise<void> => {
     const faults: string[] = [];
     let threeMF = false;
     for (const file of files) {
+      // A batch that waited for another may start after the page closed.
+      if (closed()) return;
       let reading = true;
       let name = '';
       try {
         const loaded = await file;
+        if (closed()) return;
         reading = false;
         name = loaded.name;
         const imported = await readMeshFile(loaded);
-        if (controller.signal.aborted) {
+        if (closed()) {
           for (const part of imported.parts) part.geometry.dispose();
           return;
         }
@@ -264,7 +268,7 @@
         }
         threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (closed()) return;
         const reason = t(faultKey(error, reading));
         faults.push(
           name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
@@ -319,15 +323,20 @@
   };
 
   /** The plate and the printer as they are now, read when the slice ends. */
-  const now = (): PrintState => ({
-    key: JSON.stringify([signature, bed]),
+  /** The plate and the printer as a send depends on them, read when asked. */
+  const now = (): SendSnapshot => ({
+    plate: JSON.stringify([signature, bed]),
     printer: printer?.id,
-    printable: plate.printable,
+    action: decision.action,
+    sendable: plate.printable && printerBlockOf(printer, queue) === undefined,
   });
 
   const print = async (): Promise<void> => {
     notice = undefined;
     if (decision.block !== undefined || !printer) return;
+    // The printer the plate goes to stays chosen, so the list reordering
+    // while the plate is sliced cannot change it.
+    if (printerChoice !== printer.id) choose(printer.id);
     await flow.print(input(), { id: printer.id, name: printer.name }, now);
   };
 

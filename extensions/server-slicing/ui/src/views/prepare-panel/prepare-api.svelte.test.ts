@@ -1,6 +1,7 @@
 import type { ModuleHost } from '@prusa/connect-ui/slots';
 import { describe, expect, it, vi } from 'vitest';
 
+import { PageClosed, PlateChanged } from '../../plate/sendable';
 import { prepareOn } from './prepare-api';
 
 type Storages = Awaited<ReturnType<ModuleHost['client']['listDeviceStorages']>>;
@@ -63,6 +64,7 @@ describe('printing the sliced plate', () => {
     const printed = prepareOn(client, unused).print(
       request,
       new AbortController().signal,
+      () => undefined,
     );
     answer(usb);
     await printed;
@@ -83,10 +85,33 @@ describe('printing the sliced plate', () => {
   it('starts nothing when the workspace closed while the printer was asked', async () => {
     const { client, calls, answer } = clientWith();
     const controller = new AbortController();
-    const printed = prepareOn(client, unused).print(request, controller.signal);
+    const printed = prepareOn(client, unused).print(
+      request,
+      controller.signal,
+      () => {
+        if (controller.signal.aborted) throw new PageClosed();
+      },
+    );
     controller.abort();
     answer(usb);
-    await expect(printed).rejects.toThrow('The workspace closed');
+    await expect(printed).rejects.toBeInstanceOf(PageClosed);
+    expect(calls.printDeviceFile).not.toHaveBeenCalled();
+  });
+
+  it('starts nothing when the plate stopped being sendable while the printer was asked', async () => {
+    const { client, calls, answer } = clientWith();
+    let sendable = true;
+    const printed = prepareOn(client, unused).print(
+      request,
+      new AbortController().signal,
+      () => {
+        if (!sendable) throw new PlateChanged();
+      },
+    );
+    // The bed shrank, or the printer started printing, during the lookup.
+    sendable = false;
+    answer(usb);
+    await expect(printed).rejects.toBeInstanceOf(PlateChanged);
     expect(calls.printDeviceFile).not.toHaveBeenCalled();
   });
 });
