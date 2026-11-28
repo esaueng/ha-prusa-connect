@@ -8,7 +8,8 @@ What changed in this module, newest first. The top heading is the version
 
 ### Fixed
 
-- A print whose plate or printer changed during the upload or the job's creation still sliced the plate. A request the connection dropped could also be sent again. The print now stops before each of those steps, and a request it stops is not sent again. A drag that ends where it began no longer adds an Undo step.
+- A print or queue entry stops before its next request when the plate or printer changes during the upload or the job's creation, and that request is not sent again. Once the print or the entry is sent, the page reports the server's answer, even if the printer changed meanwhile.
+- A drag that ends where it began, or R pressed while the button is still down, no longer adds an Undo step that changes nothing.
 
 ## 0.8.0 - 2026-11-28
 

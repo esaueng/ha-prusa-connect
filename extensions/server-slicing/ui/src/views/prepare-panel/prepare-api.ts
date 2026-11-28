@@ -208,8 +208,11 @@ export const prepareOn = (
     const path = page.reported
       ? landingPathOf(page.items ?? [], name)
       : undefined;
-    guard();
-    if (path === undefined) throw new NoPrinterStorage(deviceId, page.reported);
+    if (path === undefined) {
+      guard();
+      throw new NoPrinterStorage(deviceId, page.reported);
+    }
+    guard('final');
     const outcome = await printFile(client, {
       deviceId,
       path,
@@ -250,10 +253,9 @@ export const prepareOn = (
   async enqueue(id, device, signal, guard) {
     guard();
     await api.checkPrintQueue({ path: { device } }, signal);
-    guard();
-    return api.enqueueJob(
-      { path: { id }, body: { device_id: device } },
-      signal,
-    );
+    guard('final');
+    // The entry is added whatever happens on the page from here, so the
+    // request has no signal: a cut-short answer could hide an entry made.
+    return api.enqueueJob({ path: { id }, body: { device_id: device } });
   },
 });

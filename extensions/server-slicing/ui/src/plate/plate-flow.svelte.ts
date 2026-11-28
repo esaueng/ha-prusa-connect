@@ -86,6 +86,20 @@ export const signatureOf = (
     input.storage,
   ]);
 
+/** True when `thrown`, or an error it was caused by, is `reason`. */
+const causedBy = (thrown: unknown, reason: unknown): boolean => {
+  let at: unknown = thrown;
+  for (
+    let depth = 0;
+    depth < 4 && typeof at === 'object' && at !== null;
+    depth += 1
+  ) {
+    if (at === reason || at instanceof PlateChanged) return true;
+    at = 'cause' in at ? at.cause : undefined;
+  }
+  return false;
+};
+
 /**
  * What each step of one action waits under: the guard it calls before every
  * request and after every wait, and the signal every request is sent with.
@@ -296,11 +310,13 @@ export class PlateFlow {
 
   /**
    * What a print or a queue entry waits under. `current` is read now, as the
-   * snapshot the button was pressed for. The guard compares it with the page
-   * as it is, and the signal is aborted the moment they stop matching, so a
-   * request in flight is cut short and the SDK does not send it again, which
-   * its own retries would otherwise do. `stopped` turns a request the stale
-   * signal cut short into the change the person is told about.
+   * snapshot the button was pressed for. Until the final request goes out, the
+   * guard compares it with the page as it is, and the signal is aborted the
+   * moment they stop matching, so a request in flight is cut short and the SDK
+   * does not send it again. Once the guard passes with `'final'`, the send is
+   * committed: the watch ends, nothing aborts it, and whatever the final
+   * request answers is reported as it is. `stopped` turns an error into the
+   * change the person is told about only when this send's own abort caused it.
    */
   #sendFor(current: () => SendSnapshot): {
     send: Send & { dispose: () => void };
@@ -308,27 +324,43 @@ export class PlateFlow {
   } {
     const pressed = current();
     const stale = new AbortController();
+    const reason = new PlateChanged();
+    let committed = false;
+    let watching = true;
     const watch = $effect.root(() => {
       $effect(() => {
-        if (!stillSendable(pressed, current())) stale.abort();
+        if (!committed && !stillSendable(pressed, current()))
+          stale.abort(reason);
       });
     });
+    const release = (): void => {
+      if (!watching) return;
+      watching = false;
+      watch();
+      this.#signal.removeEventListener('abort', release);
+    };
+    // A closed page reads nothing more from its snapshot.
+    this.#signal.addEventListener('abort', release, { once: true });
     const send = {
       signal: AbortSignal.any([this.#signal, stale.signal]),
-      guard: () => {
+      guard: (step?: 'final') => {
         this.#live();
         if (stale.signal.aborted || !stillSendable(pressed, current())) {
-          stale.abort();
+          stale.abort(reason);
           throw new PlateChanged();
         }
+        if (step === 'final') {
+          committed = true;
+          release();
+        }
       },
-      dispose: watch,
+      dispose: release,
     };
     const stopped = async <T>(step: Promise<T>): Promise<T> => {
       try {
         return await step;
       } catch (thrown) {
-        if (stale.signal.aborted && !this.#signal.aborted)
+        if (!committed && stale.signal.aborted && causedBy(thrown, reason))
           throw new PlateChanged();
         throw thrown;
       }
