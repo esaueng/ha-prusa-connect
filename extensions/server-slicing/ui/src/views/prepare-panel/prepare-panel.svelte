@@ -104,8 +104,12 @@
   let reads: Promise<void> = Promise.resolve();
   const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
-  /** What the batches read since the last idle moment say about their files. */
-  let importNotes = $state.raw<readonly string[]>([]);
+  /**
+   * What each batch said about its files, named by file. A batch sets only
+   * its own notes, so a later batch leaves an earlier one's in place.
+   */
+  let importNotes = $state.raw<readonly { batch: number; text: string }[]>([]);
+  let batchCount = 0;
   /** The STEP mesh tolerance for files added from now on, in mm. */
   let tolerance = $state(STEP_TOLERANCE_MM);
   /** A STEP file was added or refused, so its tolerance is shown. */
@@ -253,13 +257,14 @@
   ): Promise<void> => {
     if (batches === 0) {
       modelFaults = [];
-      importNotes = [];
       notice = undefined;
     }
     batches += 1;
+    batchCount += 1;
+    const batch = batchCount;
     // A file is meshed at the tolerance shown when it was added.
     const atTolerance = tolerance;
-    const read = reads.then(() => readBatch(files, names, atTolerance));
+    const read = reads.then(() => readBatch(files, names, atTolerance, batch));
     reads = read.finally(() => {
       batches -= 1;
     });
@@ -277,10 +282,10 @@
     files: readonly (Promise<File> | File)[],
     names: readonly string[],
     atTolerance: number,
+    batch: number,
   ): Promise<void> => {
     const faults: string[] = [];
     const notes: string[] = [];
-    let threeMF = false;
     for (const [at, file] of files.entries()) {
       // A batch that waited for another may start after the page closed.
       if (closed()) return;
@@ -311,7 +316,13 @@
           );
           continue;
         }
-        threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
+        if (loaded.name.toLowerCase().endsWith('.3mf'))
+          notes.push(
+            t('slicer.plate.fileFault', {
+              file: loaded.name,
+              reason: t('slicer.prepare.geometryOnly'),
+            }),
+          );
         if (imported.bodies !== undefined && imported.bodies > 1)
           notes.push(
             t('slicer.plate.fileFault', {
@@ -328,8 +339,10 @@
       }
     }
     if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
-    if (threeMF) notes.push(t('slicer.prepare.geometryOnly'));
-    if (notes.length > 0) importNotes = [...importNotes, ...notes];
+    importNotes = [
+      ...importNotes.filter((note) => note.batch !== batch),
+      ...notes.map((text) => ({ batch, text })),
+    ];
   };
 
   const isStep = (name: string): boolean => /\.(?:step|stp)$/iu.test(name);
@@ -348,12 +361,24 @@
     return t(faultKey(error, reading));
   };
 
-  const changeTolerance = (event: Event): void => {
+  /**
+   * Takes each valid value as it is typed, so a file dropped while the field
+   * still has focus is meshed at what the field shows.
+   */
+  const typeTolerance = (event: Event): void => {
     if (!(event.currentTarget instanceof HTMLInputElement)) return;
     const input = event.currentTarget;
     if (Number.isFinite(input.valueAsNumber) && input.validity.valid)
       tolerance = input.valueAsNumber;
-    else input.value = String(tolerance);
+  };
+
+  /** Puts the value in use back when the field is left with an invalid one. */
+  const changeTolerance = (event: Event): void => {
+    typeTolerance(event);
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const input = event.currentTarget;
+    if (!(Number.isFinite(input.valueAsNumber) && input.validity.valid))
+      input.value = String(tolerance);
   };
 
   const faultKey = (error: unknown, reading: boolean): string => {
@@ -614,6 +639,7 @@
               step="any"
               aria-describedby="{id}-tolerance-note"
               value={tolerance}
+              oninput={typeTolerance}
               onchange={changeTolerance}
             />
           </div>
@@ -720,7 +746,7 @@
             class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
             data-part="plate-notice"
           >
-            {note}
+            {note.text}
           </p>
         {/each}
         {#if noticeText}

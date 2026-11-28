@@ -545,3 +545,70 @@ describe('what the re-check of the rebase found', () => {
       .toBeVisible();
   });
 });
+
+describe('what the re-check of the fixes found', () => {
+  it('meshes a file dropped while the tolerance field still has focus at what it shows', async () => {
+    const postMessage = vi.spyOn(Worker.prototype, 'postMessage');
+    try {
+      await render(PreparePanel, { props: workspace() });
+      drop(await loadFixture('block-and-peg-inch.step'));
+      await expect.element(status()).toMatchTextContent('1 part');
+
+      // Typed, not yet left: no change event has fired.
+      const tolerance = page.getByLabelText('STEP mesh (mm)', { exact: true });
+      await tolerance.fill('0.1');
+      expect(document.activeElement).toBe(tolerance.element());
+      drop(await loadFixture('nist-ftc-11-ap203.stp'));
+      await expect.element(status()).toMatchTextContent('2 parts');
+
+      const sent = postMessage.mock.calls.map(
+        ([request]) => (request as { tolerance: number }).tolerance,
+      );
+      expect(sent).toEqual([STEP_TOLERANCE_MM, 0.1]);
+    } finally {
+      postMessage.mockRestore();
+    }
+  });
+
+  it('names the notice of each file, and a later batch leaves earlier notices', async () => {
+    const answers = holdWorkerAnswers();
+    try {
+      await page.viewport(1440, 900);
+      await render(PreparePanel, { props: workspace() });
+      // The STEP file holds the queue, so the two 3MF files are two batches
+      // read before it drains.
+      drop(await loadFixture('block-and-peg-inch.step'));
+      drop(await loadFixture('assembled.3mf', 'left.3mf'));
+      drop(await loadFixture('assembled.3mf', 'right.3mf'));
+      answers.release();
+      for (const name of ['left.3mf', 'right.3mf'])
+        await expect
+          .element(
+            page.getByText(
+              new RegExp(
+                `^${name.replace('.', '\\.')}: 3MF imports solid geometry`,
+                'u',
+              ),
+            ),
+          )
+          .toBeVisible();
+      await expect.element(status()).toMatchTextContent('5 parts');
+
+      // A batch dropped once the queue is idle keeps them.
+      drop(modelFile('later.stl'));
+      await expect.element(status()).toMatchTextContent('6 parts');
+      await expect
+        .element(page.getByText(/^left\.3mf: 3MF imports solid geometry/u))
+        .toBeVisible();
+      await expect
+        .element(
+          page.getByText(
+            'block-and-peg-inch.step: The 2 bodies of the STEP file are one part on the plate.',
+          ),
+        )
+        .toBeVisible();
+    } finally {
+      answers.restore();
+    }
+  });
+});
