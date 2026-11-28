@@ -13,6 +13,7 @@
 package routes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -97,6 +98,7 @@ type State struct {
 type Service struct {
 	State  func() State
 	Access Access
+	Calls  routesapi.Modules
 }
 
 // New is the whole HTTP surface of this module. Every path is relative to the
@@ -115,6 +117,8 @@ func New(s Service) http.Handler {
 	mux.HandleFunc("POST /jobs/upload", s.acting(s.upload, true))
 	mux.HandleFunc("GET /jobs/{id}", s.acting(s.getJob, true))
 	mux.HandleFunc("POST /jobs/{id}/cancel", s.acting(s.cancel, true))
+	mux.HandleFunc("POST /jobs/{id}/enqueue", s.acting(s.enqueue, true))
+	mux.HandleFunc("GET /print-queue/{device}", s.acting(s.checkPrintQueue, false))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		answer(w, http.StatusNotFound, map[string]string{"module_saw": r.URL.Path})
@@ -519,11 +523,16 @@ func readJSON(w http.ResponseWriter, r *http.Request, into any) bool {
 		return false
 	}
 
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 
 	if err = decoder.Decode(into); err != nil {
 		refuse(w, Invalid, "the body is not the JSON this route reads: "+err.Error())
+
+		return false
+	}
+	if len(bytes.Trim(data[decoder.InputOffset():], " \t\r\n")) != 0 {
+		refuse(w, Invalid, "send one JSON value in the request body")
 
 		return false
 	}

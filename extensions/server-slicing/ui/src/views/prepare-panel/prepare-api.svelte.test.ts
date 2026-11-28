@@ -49,6 +49,8 @@ const clientWith = () => {
 const unused = {
   submitJob: () => Promise.reject(new Error('printing submits no job')),
   readJob: () => Promise.reject(new Error('printing reads no job')),
+  checkPrintQueue: () => Promise.reject(new Error('printing checks no queue')),
+  enqueueJob: () => Promise.reject(new Error('printing queues no job')),
 };
 
 const request = {

@@ -21,6 +21,7 @@
     DropdownMenuItem,
     DropdownMenuTrigger,
   } from '@prusa/connect-ui/primitives';
+  import { onMount } from 'svelte';
 
   import type { Translate } from '../../api';
   import type { FlowStep } from '../../plate/plate-flow.svelte';
@@ -34,6 +35,7 @@
     canSave,
     describedBy,
     t,
+    onCheckQueue,
     onPrint,
     onSliceOnly,
     onDownload,
@@ -50,11 +52,18 @@
     /** The id of the sentence that says why the button is off. */
     describedBy?: string | undefined;
     t: Translate;
+    onCheckQueue?: ((signal: AbortSignal) => void) | undefined;
     onPrint: () => void;
     onSliceOnly: () => void;
     onDownload: () => void;
     onSaveStl: () => void;
   } = $props();
+
+  onMount(() => {
+    const request = new AbortController();
+    onCheckQueue?.(request.signal);
+    return () => request.abort();
+  });
 
   const busy = $derived(step !== 'idle');
   const label = $derived(

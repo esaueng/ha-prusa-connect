@@ -61,6 +61,28 @@ var (
 		Title: "there is no such job"}
 	JobFinished = Code{Name: string(jobs.CodeFinished), Status: http.StatusConflict,
 		Title: "the job has finished already"}
+	JobNotPrintable = Code{Name: "server-slicing/JOB_NOT_PRINTABLE", Status: http.StatusConflict,
+		Title: "the slicing job has no finished print file"}
+	PrintQueueUnavailable = Code{Name: "server-slicing/PRINT_QUEUE_UNAVAILABLE", Status: http.StatusServiceUnavailable,
+		Title: "the Print queue module is not running", Retryable: true}
+	PrintQueueNotApproved = Code{Name: "server-slicing/PRINT_QUEUE_NOT_APPROVED", Status: http.StatusForbidden,
+		Title: "the operator must approve the Print queue permission for Slicing"}
+	PrintQueueDenied = Code{Name: "server-slicing/PRINT_QUEUE_DENIED", Status: http.StatusForbidden,
+		Title: "you may not add prints to this queue"}
+	PrintQueuePrinterNotFound = Code{Name: "server-slicing/PRINT_QUEUE_PRINTER_NOT_FOUND", Status: http.StatusNotFound,
+		Title: "the Print queue cannot find this printer"}
+	PrintQueuePrinterUnknown = Code{
+		Name:      "server-slicing/PRINT_QUEUE_PRINTER_UNKNOWN",
+		Status:    http.StatusServiceUnavailable,
+		Title:     "the Print queue could not read this printer",
+		Retryable: true,
+	}
+	PrintQueueFull = Code{Name: "server-slicing/PRINT_QUEUE_FULL", Status: http.StatusConflict,
+		Title: "the queue of this printer is full"}
+	PrintQueueFileNotFound = Code{Name: "server-slicing/PRINT_QUEUE_FILE_NOT_FOUND", Status: http.StatusNotFound,
+		Title: "the sliced file is no longer in storage"}
+	PrintQueueFailed = Code{Name: "server-slicing/PRINT_QUEUE_FAILED", Status: http.StatusBadGateway,
+		Title: "the Print queue did not confirm the request"}
 
 	NotOffered = Code{Name: "server-slicing/VERSION_NOT_OFFERED", Status: http.StatusNotFound,
 		Title: "no manifest offers that version for this server"}
@@ -79,6 +101,8 @@ var (
 // Codes answers every code this module can return, sorted by name.
 func Codes() []Code {
 	held := []Code{
+		JobNotPrintable, PrintQueueUnavailable, PrintQueueNotApproved, PrintQueueDenied,
+		PrintQueuePrinterNotFound, PrintQueuePrinterUnknown, PrintQueueFull, PrintQueueFileNotFound, PrintQueueFailed,
 		Invalid, BodyTooLarge, NoPrincipal, NotReady, NoData, NotAdministrator, AccessUnknown,
 		SourceNotFound, SourceDenied, SourceTooLarge, NotAProject, OutputDenied, NoSlicer,
 		QueueFull, JobNotFound, JobFinished, NotOffered, NotInstalled, SlicerBusy,

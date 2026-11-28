@@ -27,6 +27,7 @@
   args={{ selected: 1, selectedName: 'bracket.stl' }}
 />
 <Story name="Several selected" args={{ selected: 2 }} />
+<Story name="Prints waiting" args={{ waiting: 2 }} />
 <Story
   name="Blocked"
   args={{ blocked: 'A part is outside the print volume.' }}

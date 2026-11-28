@@ -63,7 +63,6 @@
     devices,
     remember,
     links = [],
-    queue = false,
     t,
   }: {
     /** The rectangular print volume of each saved profile, by name. */
@@ -78,8 +77,6 @@
     devices: readonly Device[];
     remember: Remember;
     links?: readonly ToolbarLink[];
-    /** Whether this page can add a plate to a printer's print queue. */
-    queue?: boolean;
     t: Translate;
   } = $props();
 
@@ -189,7 +186,21 @@
     storage: storage !== '',
     busy: flow.busy || loading,
   });
-  const decision = $derived(decidePrint(printer, readiness, queue));
+  const decision = $derived(
+    decidePrint(printer, readiness, flow.queueBlock(printer?.id)),
+  );
+  const queueTarget = $derived(
+    decision.action === 'queue' && printer?.mayPrint ? printer.id : undefined,
+  );
+  const waiting = $derived(printer ? flow.waitingFor(printer.id) : undefined);
+  const flowFault = $derived.by(() => {
+    const fault = flow.fault;
+    if (!fault?.code?.startsWith('server-slicing/')) return fault;
+    const key = `error.${fault.code}`;
+    const title = t(key);
+    if (title === key || title === fault.title) return fault;
+    return { ...fault, title, detail: fault.detail ?? fault.title };
+  });
   const canSlice = $derived(plateBlockOf(readiness) === undefined);
   const selectedName = $derived(
     plate.selection.length === 1 ? plate.selection[0]?.name : undefined,
@@ -207,6 +218,10 @@
   const choose = (next: string): void => {
     printerChoice = next;
     remember.write(PRINTER_KEY, next);
+  };
+
+  const checkQueue = (signal: AbortSignal): void => {
+    if (queueTarget) void flow.checkQueue(queueTarget, signal);
   };
 
   const keep = (next: PlateChoices): void => {
@@ -322,22 +337,23 @@
       notice = { key: 'slicer.plate.notice.copied', params: { count: added } };
   };
 
-  /** The plate and the printer as they are now, read when the slice ends. */
   /** The plate and the printer as a send depends on them, read when asked. */
   const now = (): SendSnapshot => ({
     plate: JSON.stringify([signature, bed]),
     printer: printer?.id,
     action: decision.action,
-    sendable: plate.printable && printerBlockOf(printer, queue) === undefined,
+    sendable:
+      plate.printable &&
+      printerBlockOf(printer, flow.queueBlock(printer?.id)) === undefined,
   });
 
   const print = async (): Promise<void> => {
     notice = undefined;
     if (decision.block !== undefined || !printer) return;
-    // The printer the plate goes to stays chosen, so the list reordering
-    // while the plate is sliced cannot change it.
+    // Keep the chosen printer when live updates reorder the list.
     if (printerChoice !== printer.id) choose(printer.id);
-    await flow.print(input(), { id: printer.id, name: printer.name }, now);
+    if (decision.action === 'queue') await flow.enqueue(input(), printer, now);
+    else await flow.print(input(), printer, now);
   };
 
   const sliceOnly = async (): Promise<void> => {
@@ -526,19 +542,22 @@
         {t}
         onChange={keep}
       />
-      <PrintButton
-        {decision}
-        estimate={sliced?.result?.estimated_seconds}
-        step={flow.step}
-        {canSlice}
-        canSave={plate.parts.length > 0 && storage !== '' && !flow.busy}
-        describedBy="{id}-blocked"
-        {t}
-        onPrint={() => void print()}
-        onSliceOnly={() => void sliceOnly()}
-        onDownload={() => void download()}
-        onSaveStl={() => void saveStl()}
-      />
+      {#key queueTarget}
+        <PrintButton
+          {decision}
+          estimate={sliced?.result?.estimated_seconds}
+          step={flow.step}
+          {canSlice}
+          canSave={plate.parts.length > 0 && storage !== '' && !flow.busy}
+          describedBy="{id}-blocked"
+          {t}
+          onCheckQueue={checkQueue}
+          onPrint={() => void print()}
+          onSliceOnly={() => void sliceOnly()}
+          onDownload={() => void download()}
+          onSaveStl={() => void saveStl()}
+        />
+      {/key}
     {/snippet}
   </PlateToolbar>
 
@@ -587,7 +606,7 @@
 
     <div class="absolute inset-x-3 top-3 grid gap-2">
       <FaultAlert fault={destinationFault} />
-      <FaultAlert fault={flow.fault} />
+      <FaultAlert fault={flowFault} />
       {#each modelFaults as fault, at (at)}
         <FaultAlert
           fault={{ code: undefined, title: fault, detail: undefined }}
@@ -617,6 +636,7 @@
     {selectedName}
     {bed}
     printerName={printer?.name}
+    {waiting}
     {blocked}
     warning={plate.overlapping.length > 0
       ? t('slicer.plate.overlap', { count: plate.overlapping.length })

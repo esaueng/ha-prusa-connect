@@ -29,7 +29,7 @@ Each page below says what the extension adds to the app, what it needs from the 
 - **[Fleet stats](./fleet-stats.md)** 0.3.4. Job KPIs, a daily trend, the most printed files, a utilization heatmap and failures for the fleet, with dashboard cards.
 - **[Materials](./materials.md)** 0.2.7. A catalogue of filament materials, and the spools a person has of them.
 - **[Parts](./parts.md)** 0.3.8. A private catalogue of parts, with folders, versions of their files, comments and printing.
-- **[Server slicing](./server-slicing.md)** 0.6.0. Slices 3MF projects and STL models into G-code on this server with the PrusaSlicer command line.
+- **[Server slicing](./server-slicing.md)** 0.7.0. Slices 3MF projects and STL models into G-code on this server with the PrusaSlicer command line.
 - **[Print queue](./simple-queue.md)** 0.1.0. A queue of print files for each printer. The next file starts when the bed is clear.
 - **[3MF projects](./threemf.md)** 0.1.13. Shows a 3MF project on the page of its file, with its beds, objects and settings, and reads 3MF files for the server.
 

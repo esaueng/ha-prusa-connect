@@ -12,9 +12,11 @@ import type { Job } from '../api';
 import { makeSTL, type PlacedMesh } from '../views/prepare-panel/model';
 import {
   placedName,
+  queueBlockOf,
   type PrepareApi,
 } from '../views/prepare-panel/prepare-api';
 import type { PrintSettings } from './print-settings';
+import type { QueueBlock } from './printers';
 import {
   PageClosed,
   PlateChanged,
@@ -27,7 +29,7 @@ import {
 export const JOB_POLL_MS = 1000;
 
 /** What the flow is doing now. */
-export type FlowStep = 'idle' | 'saving' | 'slicing' | 'sending';
+export type FlowStep = 'idle' | 'saving' | 'slicing' | 'sending' | 'queueing';
 
 /** Everything one slice of the plate depends on. */
 export interface PlateInput {
@@ -89,6 +91,8 @@ export class PlateFlow {
   #fault = $state.raw<FaultText | undefined>(undefined);
   #notice = $state.raw<FlowNotice | undefined>(undefined);
   #sliced = $state.raw<{ signature: string; job: Job } | undefined>(undefined);
+  #queue = $state.raw<{ printer: string; block: QueueBlock | undefined }>();
+  #waiting = $state.raw<Readonly<Record<string, number | undefined>>>({});
   #saved: { meshKey: string; storage: string; path: string } | undefined;
   readonly #api: PrepareApi;
   readonly #signal: AbortSignal;
@@ -114,6 +118,24 @@ export class PlateFlow {
 
   get notice(): FlowNotice | undefined {
     return this.#notice;
+  }
+
+  queueBlock(printer: string | undefined): QueueBlock | undefined {
+    const queue = this.#queue;
+    return queue && queue.printer === printer ? queue.block : 'queueChecking';
+  }
+
+  waitingFor(printer: string): number | undefined {
+    return Object.hasOwn(this.#waiting, printer)
+      ? this.#waiting[printer]
+      : undefined;
+  }
+
+  async checkQueue(printer: string, selected: AbortSignal): Promise<void> {
+    const signal = AbortSignal.any([this.#signal, selected]);
+    this.#queue = { printer, block: 'queueChecking' };
+    const block = await this.#api.checkQueue(printer, signal);
+    if (!signal.aborted) this.#queue = { printer, block };
   }
 
   /** The finished job of the plate as it is, or undefined once it changed. */
@@ -190,6 +212,46 @@ export class PlateFlow {
       return true;
     });
     return ok === true;
+  }
+
+  /** Slices the plate if it changed, then adds the finished job to Print queue. */
+  async enqueue(
+    input: PlateInput,
+    printer: { id: string; name: string },
+    current: () => SendSnapshot,
+  ): Promise<void> {
+    const pressed = current();
+    await this.#run(async () => {
+      this.#step = 'queueing';
+      const job = await this.#slicedJob(input);
+      this.#live();
+      if (!stillSendable(pressed, current())) throw new PlateChanged();
+      this.#step = 'queueing';
+      try {
+        const { waiting, position } = await this.#api.enqueue(
+          job.id,
+          printer.id,
+          this.#signal,
+        );
+        this.#live();
+        this.#waiting = { ...this.#waiting, [printer.id]: waiting };
+        this.#notice =
+          position === undefined
+            ? {
+                key: 'slicer.plate.notice.queued',
+                params: { printer: printer.name },
+              }
+            : {
+                key: 'slicer.plate.notice.queuedAt',
+                params: { printer: printer.name, position },
+              };
+      } catch (error) {
+        const block = queueBlockOf(describeFault(error).code);
+        if (block !== undefined && this.#queue?.printer === printer.id)
+          this.#queue = { printer: printer.id, block };
+        throw error;
+      }
+    });
   }
 
   /** Slices the plate if it changed and answers its G-code as a file. */

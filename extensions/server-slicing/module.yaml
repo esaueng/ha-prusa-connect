@@ -13,7 +13,7 @@ codeowner: Prusa Research
 # The kind the one instance is declared under. It offers the service runtime,
 # which a module with a process half needs.
 kind: sink
-version: 0.6.0
+version: 0.7.0
 license: OCL v1.1 + Micro v1 + NoSaaS v1 + SWAtt v1
 # The major version of the protocol between this process and the host.
 contract_major: 1
@@ -36,6 +36,13 @@ require:
   core-storage.read: "*"
   core-storage.write: "*"
   core-access.check: "*"
+  core-routes.call: "*"
+
+suggest:
+  com.github.aux.prusa3d.simple-queue: Adds sliced files to a printer's queue from the Slicing page.
+
+calls:
+  - com.github.aux.prusa3d.simple-queue
 
 # What the module does as itself. A worker slices a job after the person's
 # request has closed, so it reads the project and writes the G-code as the

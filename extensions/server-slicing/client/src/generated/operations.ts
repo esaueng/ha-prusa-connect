@@ -7,6 +7,8 @@ import type { operations } from "./module-api.js";
 /** Every operation the document declares, keyed by its operationId. */
 export const operationTable = {
   "cancel-job": { id: "cancel-job", method: "POST", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/jobs/{id}/cancel", response: "json", anonymous: false },
+  "check-print-queue": { id: "check-print-queue", method: "GET", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/print-queue/{device}", response: "none", anonymous: false },
+  "enqueue-job": { id: "enqueue-job", method: "POST", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/jobs/{id}/enqueue", body: "application/json", response: "json", anonymous: false },
   "install-slicer": { id: "install-slicer", method: "POST", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/slicers/install", body: "application/json", response: "json", anonymous: false },
   "list-jobs": { id: "list-jobs", method: "GET", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/jobs", response: "json", anonymous: false },
   "list-slicers": { id: "list-slicers", method: "GET", path: "/api/v1/modules/com.github.aux.prusa3d.server-slicing/slicers", response: "json", anonymous: false },
@@ -32,6 +34,31 @@ export interface Operations {
     },
     signal?: AbortSignal,
   ): Promise<operations["cancel-job"]["responses"][200]["content"]["application/json"]>;
+
+  /**
+   * GET /api/v1/modules/com.github.aux.prusa3d.server-slicing/print-queue/{device}
+   *
+   * Check whether the caller may add to a printer queue
+   */
+  checkPrintQueue(
+    request: {
+      path: operations["check-print-queue"]["parameters"]["path"];
+    },
+    signal?: AbortSignal,
+  ): Promise<void>;
+
+  /**
+   * POST /api/v1/modules/com.github.aux.prusa3d.server-slicing/jobs/{id}/enqueue
+   *
+   * Add a finished slicing job to a printer queue
+   */
+  enqueueJob(
+    request: {
+      path: operations["enqueue-job"]["parameters"]["path"];
+      body: NonNullable<operations["enqueue-job"]["requestBody"]>["content"]["application/json"];
+    },
+    signal?: AbortSignal,
+  ): Promise<operations["enqueue-job"]["responses"][201]["content"]["application/json"]>;
 
   /**
    * POST /api/v1/modules/com.github.aux.prusa3d.server-slicing/slicers/install
@@ -154,6 +181,8 @@ export interface Operations {
 export function bindOperations(transport: Transport): Operations {
   return {
     cancelJob: (request, signal) => transport.call(operationTable["cancel-job"], request, signal),
+    checkPrintQueue: (request, signal) => transport.call(operationTable["check-print-queue"], request, signal),
+    enqueueJob: (request, signal) => transport.call(operationTable["enqueue-job"], request, signal),
     installSlicer: (request, signal) => transport.call(operationTable["install-slicer"], request, signal),
     listJobs: (request = {}, signal) => transport.call(operationTable["list-jobs"], request, signal),
     listSlicers: (request = {}, signal) => transport.call(operationTable["list-slicers"], request, signal),
