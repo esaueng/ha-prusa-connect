@@ -5,7 +5,7 @@ import {
   Matrix4,
   Vector3,
 } from 'three';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { STLBed } from '../api';
 import { ARRANGE_GAP_MM } from './arrange';
@@ -405,6 +405,115 @@ describe('arranging', () => {
         a.maxY + ARRANGE_GAP_MM <= b.minY ||
         b.maxY + ARRANGE_GAP_MM <= a.minY,
     ).toBe(true);
+    plate.dispose();
+  });
+});
+
+describe('no room', () => {
+  const small: STLBed = {
+    min_x: 0,
+    min_y: 0,
+    max_x: 100,
+    max_y: 100,
+    height: 100,
+  };
+
+  it('moves nothing when Arrange finds no room for every part', () => {
+    const plate = new Plate(() => small);
+    const a = placed(plate, [25, 50], [50, 90, 10]);
+    const b = placed(plate, [75, 50], [48, 90, 10]);
+    expect(plate.overlapping).toEqual([]);
+
+    // Gaps of 6 mm leave room for one of the two, so neither moves.
+    expect(plate.arrange('all')).toBe(1);
+    expect(plate.parts.map((part) => [part.x, part.y])).toEqual([
+      [a.x, a.y],
+      [b.x, b.y],
+    ]);
+    expect(plate.overlapping).toEqual([]);
+    expect(plate.canUndo).toBe(true);
+    plate.undo();
+    plate.undo();
+    expect(plate.canUndo).toBe(false);
+    plate.dispose();
+  });
+
+  it('adds no copy when the bed has no free space for it', () => {
+    const plate = new Plate(() => small);
+    const part = placed(plate, [50, 50], [70, 70, 10]);
+    plate.press(part.id, false);
+    const before = plate.parts;
+
+    expect(plate.copy()).toBe('noRoom');
+    expect(plate.parts).toBe(before);
+    expect(plate.selected).toEqual([part.id]);
+    plate.dispose();
+  });
+
+  it('flags parts whose boxes overlap at the same height', () => {
+    const plate = plateOf();
+    const a = placed(plate, [50, 50], [20, 20, 10]);
+    const b = placed(plate, [60, 50], [20, 20, 10]);
+    expect(plate.overlapping).toEqual([a.id, b.id]);
+    // A part standing above another, as in a 3MF assembly, does not overlap it.
+    const above = box(20, 20, 10);
+    above.translate(150, 50, 15);
+    const under = box(20, 20, 10);
+    under.translate(150, 50, 5);
+    plate.add(
+      {
+        parts: [{ geometry: under }, { geometry: above }],
+        preservePlacement: true,
+      },
+      'stack.3mf',
+    );
+    expect(plate.overlapping).toEqual([a.id, b.id]);
+    expect(plate.printable).toBe(true);
+    plate.dispose();
+  });
+});
+
+describe('the meshes the plate holds', () => {
+  const watched = (plate: Plate, at: [number, number]) => {
+    const part = placed(plate, at);
+    const freed = vi.fn();
+    part.geometry.addEventListener('dispose', freed);
+    return { part, freed };
+  };
+
+  it('frees a removed part’s mesh once Undo no longer holds it', () => {
+    const plate = plateOf();
+    const { part, freed } = watched(plate, [50, 50]);
+    const other = placed(plate, [150, 50]);
+    plate.press(part.id, false);
+    plate.remove();
+    expect(freed).not.toHaveBeenCalled();
+
+    plate.press(other.id, false);
+    for (let i = 0; i < UNDO_STEPS; i += 1) plate.rotate();
+    expect(freed).toHaveBeenCalledTimes(1);
+    plate.dispose();
+  });
+
+  it('frees a part’s mesh when Undo takes back its adding', () => {
+    const plate = plateOf();
+    const { freed } = watched(plate, [50, 50]);
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(freed).toHaveBeenCalledTimes(1);
+    plate.dispose();
+  });
+
+  it('keeps a mesh a copy still uses', () => {
+    const plate = plateOf();
+    const { part, freed } = watched(plate, [50, 50]);
+    plate.press(part.id, false);
+    plate.copy();
+    plate.press(part.id, false);
+    plate.remove();
+    plate.selectAll();
+    for (let i = 0; i < UNDO_STEPS + 1; i += 1) plate.rotate();
+    expect(freed).not.toHaveBeenCalled();
     plate.dispose();
   });
 });

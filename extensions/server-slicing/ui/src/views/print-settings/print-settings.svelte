@@ -39,6 +39,7 @@
 
   let {
     choices,
+    profile,
     profiles,
     destinations,
     printerName,
@@ -47,6 +48,11 @@
     onChange,
   }: {
     choices: PlateChoices;
+    /**
+     * The profile the plate slices with, which the workspace chooses: the one
+     * kept for the printer, or one whose bed is the printer's size.
+     */
+    profile: string | undefined;
     /** Each saved profile and what it prints with, by name. */
     profiles: Readonly<Record<string, ProfileSettings>>;
     destinations: readonly Destination[];
@@ -59,11 +65,6 @@
 
   const id = $props.id();
   const names = $derived(Object.keys(profiles).sort());
-  const profile = $derived(
-    choices.profile && names.includes(choices.profile)
-      ? choices.profile
-      : names[0],
-  );
   const shown = $derived(
     settingsShown(profile ? profiles[profile] : undefined, choices.settings),
   );

@@ -14,6 +14,7 @@
     bed,
     printerName,
     blocked,
+    warning,
     blockedId,
     t,
   }: {
@@ -25,6 +26,8 @@
     printerName: string | undefined;
     /** Why the Print button is off, when it is. */
     blocked: string | undefined;
+    /** Something to check that does not stop the print. */
+    warning?: string | undefined;
     /** The id the Print button names this sentence by. */
     blockedId: string;
     t: Translate;
@@ -50,7 +53,7 @@
     id={blockedId}
     class="ms-auto truncate text-warning-text"
     role="status"
-    aria-live="polite">{blocked ?? ''}</span
+    aria-live="polite">{blocked ?? warning ?? ''}</span
   >
   {#if bed}
     <span>

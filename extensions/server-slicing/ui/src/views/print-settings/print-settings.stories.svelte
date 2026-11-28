@@ -15,6 +15,7 @@
     component: PrintSettings,
     args: {
       choices: { settings: {} },
+      profile: 'core-one-petg',
       profiles,
       destinations: [
         { name: 'local', label: 'Local files' },
@@ -31,6 +32,7 @@
 <Story
   name="Changed settings"
   args={{
+    profile: 'core-one-pla',
     choices: {
       profile: 'core-one-pla',
       storage: 'nas',
@@ -51,4 +53,7 @@
       "The profile's bed is 250 × 220 mm. This printer's bed is another size.",
   }}
 />
-<Story name="No saved profile" args={{ profiles: {}, destinations: [] }} />
+<Story
+  name="No saved profile"
+  args={{ profile: undefined, profiles: {}, destinations: [] }}
+/>

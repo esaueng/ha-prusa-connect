@@ -131,7 +131,9 @@ A new STL goes to free space on the bed. Each object of a 3MF is a part of
 its own, in the position stored in the file. A part below the bed is lifted
 onto it, and a part that stands on another keeps its height. Arrange and
 **Add a copy** read each part as the rectangle around it, so an L-shaped part
-takes its whole rectangle.
+takes its whole rectangle. When a part has no room, Arrange moves nothing and
+Add a copy adds nothing, and the plate says so. Parts whose rectangles
+overlap at the same height are counted in the status line as a warning.
 
 The material is a saved profile, and the plate uses the first profile whose
 bed has the printer's size. The other settings change that profile for this
@@ -142,7 +144,8 @@ one.
 **Print** saves the plate as one STL with a unique name, slices it, and sends
 the G-code to an idle printer, which starts it. Once the plate is sliced, the
 button shows the print time from the G-code. A change to the plate or to the
-settings slices it again. A printer that is printing, or that still holds a
+settings slices it again. When the plate, its settings or the printer change
+while the plate is being sliced, nothing is sent and the plate says so. A printer that is printing, or that still holds a
 finished print, shows **Add to queue** instead. That button is off for now:
 the queue belongs to the Print queue module, and this module has no approved
 call to it. The menu beside the button slices without printing, downloads

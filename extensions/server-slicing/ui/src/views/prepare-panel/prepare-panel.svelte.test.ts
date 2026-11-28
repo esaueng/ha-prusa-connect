@@ -7,6 +7,7 @@ import { render } from 'vitest-browser-svelte';
 
 import { t } from '../../test/fakes';
 import { makeSTL } from './model';
+import type { Job } from '../../api';
 import type { PrepareApi } from './prepare-api';
 import {
   assembledFile,
@@ -15,6 +16,8 @@ import {
   henry,
   loadFixture,
   memory,
+  modelFile,
+  placedJob,
   profileSettings,
   slicedJob,
   testPrepare,
@@ -316,5 +319,89 @@ describe('a 3MF on the build plate', () => {
     await expect
       .element(page.getByRole('button', { name: 'Print', exact: true }))
       .toBeDisabled();
+  });
+});
+
+describe('what the review found', () => {
+  it('sends nothing when the plate and the printer change while it is sliced', async () => {
+    let finish: (job: Job) => void = () => undefined;
+    const api = recording({
+      submit: () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+    await page.getByTestId('printer-picker').click();
+    await page.getByRole('menuitemradio', { name: /Xavier/u }).click();
+    await userEvent.keyboard('{Delete}');
+    await expect.element(status()).toMatchTextContent('0 parts');
+
+    finish(placedJob);
+    await expect
+      .element(page.getByText(/The plate changed while it was sliced/u))
+      .toBeVisible();
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  it('shows and slices with the one profile the bed was matched to', async () => {
+    const api = recording();
+    const remember = memory();
+    remember.write('plate.printer', 'xl');
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api, { remember }) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await expect
+      .element(page.getByTestId('print-settings'))
+      .toMatchTextContent('PLA');
+    await page.getByTestId('print-settings').click();
+    await expect
+      .element(page.getByLabelText('Material'))
+      .toMatchTextContent('PLA · xl-pla');
+    await userEvent.keyboard('{Escape}');
+
+    await page
+      .getByRole('button', { name: 'More ways to finish the plate' })
+      .click();
+    await page.getByRole('menuitem', { name: 'Slice only' }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+    expect(api.submit.mock.calls[0]?.[0].profile).toBe('xl-pla');
+  });
+
+  it('adds every file dropped together and names each one it cannot read', async () => {
+    await page.viewport(1440, 900);
+    await render(PreparePanel, {
+      props: props(recording(), { source: undefined }),
+    });
+    const drop = (files: File[]): void => {
+      const dataTransfer = new DataTransfer();
+      for (const file of files) dataTransfer.items.add(file);
+      page
+        .getByLabelText('3D build plate view')
+        .element()
+        .dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+    };
+
+    drop([
+      modelFile('first.stl'),
+      modelFile('second.stl'),
+      modelFile('third.stl'),
+    ]);
+    await expect.element(status()).toMatchTextContent('3 parts');
+
+    drop([
+      new File(['not a mesh at all'], 'broken.stl'),
+      modelFile('fourth.stl'),
+    ]);
+    await expect.element(status()).toMatchTextContent('4 parts');
+    await expect
+      .element(page.getByText(/^broken\.stl: Could not open the model/u))
+      .toBeVisible();
   });
 });

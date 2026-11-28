@@ -100,7 +100,7 @@
   let webglFailed = $state(false);
   let top = $state(false);
   let loading = $state(false);
-  let modelFault = $state('');
+  let modelFaults = $state.raw<readonly string[]>([]);
   let notice = $state<{ key: string; params: MessageParams }>();
   let destinations = $state.raw<Destination[]>([]);
   let destinationFault = $state<FaultText>();
@@ -177,11 +177,10 @@
     })),
   );
   const key = $derived(meshKey(meshes));
-  const sliced = $derived(
-    flow.slicedFor(
-      signatureOf({ meshKey: key, profile: profile ?? '', settings, storage }),
-    ),
+  const signature = $derived(
+    signatureOf({ meshKey: key, profile: profile ?? '', settings, storage }),
   );
+  const sliced = $derived(flow.slicedFor(signature));
   const readiness = $derived({
     parts: plate.parts.length,
     outside: plate.outside.length,
@@ -216,27 +215,55 @@
     remember.write(choicesKey(printer?.id), writeChoices(next));
   };
 
-  const load = async (file: Promise<File> | File): Promise<void> => {
+  /**
+   * Reads files onto the plate as one batch, in the order given. A file that
+   * cannot be read is named in the faults, and the others are still added.
+   */
+  const load = async (
+    files: readonly (Promise<File> | File)[],
+  ): Promise<void> => {
     const version = ++loadingVersion;
     loading = true;
-    modelFault = '';
-    let reading = true;
+    modelFaults = [];
+    notice = undefined;
+    const faults: string[] = [];
+    let added = 0;
+    let threeMF = false;
     try {
-      const loaded = await file;
-      reading = false;
-      const imported = await readMeshFile(loaded);
-      if (controller.signal.aborted || loadingVersion !== version) {
-        for (const part of imported.parts) part.geometry.dispose();
-        return;
+      for (const file of files) {
+        let reading = true;
+        let name = '';
+        try {
+          const loaded = await file;
+          reading = false;
+          name = loaded.name;
+          const imported = await readMeshFile(loaded);
+          if (controller.signal.aborted || loadingVersion !== version) {
+            for (const part of imported.parts) part.geometry.dispose();
+            return;
+          }
+          if (plate.add(imported, loaded.name)) {
+            faults.push(
+              t('slicer.plate.fileFault', {
+                file: loaded.name,
+                reason: t('slicer.plate.notice.tooManyTriangles'),
+              }),
+            );
+            continue;
+          }
+          added += 1;
+          threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
+        } catch (error) {
+          if (controller.signal.aborted || loadingVersion !== version) return;
+          const reason = t(faultKey(error, reading));
+          faults.push(
+            name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
+          );
+        }
       }
-      const refused = plate.add(imported, loaded.name);
-      if (refused)
-        notice = { key: 'slicer.plate.notice.tooManyTriangles', params: {} };
-      else if (loaded.name.toLowerCase().endsWith('.3mf'))
+      modelFaults = faults;
+      if (added > 0 && threeMF)
         notice = { key: 'slicer.prepare.geometryOnly', params: {} };
-    } catch (error) {
-      if (!controller.signal.aborted && loadingVersion === version)
-        modelFault = t(faultKey(error, reading));
     } finally {
       if (loadingVersion === version) loading = false;
     }
@@ -258,12 +285,13 @@
     if (!(event.currentTarget instanceof HTMLInputElement)) return;
     const files = [...(event.currentTarget.files ?? [])];
     event.currentTarget.value = '';
-    for (const file of files) void load(file);
+    if (files.length > 0) void load(files);
   };
 
   const dropped = (event: DragEvent): void => {
     event.preventDefault();
-    for (const file of event.dataTransfer?.files ?? []) void load(file);
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (files.length > 0) void load(files);
   };
 
   const arrangeParts = (scope: 'all' | 'selection'): void => {
@@ -276,15 +304,24 @@
 
   const copy = (): void => {
     const added = plate.copy();
-    notice = added
-      ? { key: 'slicer.plate.notice.copied', params: { count: added } }
-      : { key: 'slicer.plate.notice.tooManyTriangles', params: {} };
+    if (added === 'noRoom')
+      notice = { key: 'slicer.plate.notice.noRoom', params: {} };
+    else if (added === 'tooManyTriangles')
+      notice = { key: 'slicer.plate.notice.tooManyTriangles', params: {} };
+    else if (added > 0)
+      notice = { key: 'slicer.plate.notice.copied', params: { count: added } };
   };
+
+  /** The plate and the printer as they are now, read when the slice ends. */
+  const now = (): { signature: string; printer: string | undefined } => ({
+    signature,
+    printer: printer?.id,
+  });
 
   const print = async (): Promise<void> => {
     notice = undefined;
     if (decision.block !== undefined || !printer) return;
-    await flow.print(input(), { id: printer.id, name: printer.name });
+    await flow.print(input(), { id: printer.id, name: printer.name }, now);
   };
 
   const sliceOnly = async (): Promise<void> => {
@@ -421,7 +458,7 @@
         if (!signal.aborted) destinationFault = describeFault(error);
       });
 
-    if (from) void load(api.read(from, signal));
+    if (from) void load([api.read(from, signal)]);
 
     return () => {
       controller.abort();
@@ -463,6 +500,7 @@
       <PrinterPicker {printers} chosen={printer?.id} {t} onChoose={choose} />
       <PrintSettingsMenu
         {choices}
+        {profile}
         profiles={Object.fromEntries(
           profileNames.map((name) => [name, profileSettings[name] ?? {}]),
         )}
@@ -534,11 +572,11 @@
     <div class="absolute inset-x-3 top-3 grid gap-2">
       <FaultAlert fault={destinationFault} />
       <FaultAlert fault={flow.fault} />
-      {#if modelFault}
+      {#each modelFaults as fault, at (at)}
         <FaultAlert
-          fault={{ code: undefined, title: modelFault, detail: undefined }}
+          fault={{ code: undefined, title: fault, detail: undefined }}
         />
-      {/if}
+      {/each}
     </div>
 
     <div
@@ -564,6 +602,9 @@
     {bed}
     printerName={printer?.name}
     {blocked}
+    warning={plate.overlapping.length > 0
+      ? t('slicer.plate.overlap', { count: plate.overlapping.length })
+      : undefined}
     blockedId="{id}-blocked"
     {t}
   />

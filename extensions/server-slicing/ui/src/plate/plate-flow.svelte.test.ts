@@ -38,6 +38,14 @@ const inputOf = (x = 50, settings?: PlateInput['settings']): PlateInput => {
 
 const running: Job = { ...placedJob, state: 'running', progress: 40 };
 
+const henryPrinter = { id: 'henry', name: 'Henry' };
+
+/** The plate and the printer as they were when Print was pressed. */
+const unchangedFor = (input: PlateInput) => () => ({
+  signature: signatureOf(input),
+  printer: 'henry',
+});
+
 /** An API that answers like the fixtures and records each call. */
 const recording = (more: Partial<PrepareApi> = {}) => ({
   destinations: vi.fn(more.destinations ?? testPrepare.destinations),
@@ -59,7 +67,7 @@ describe('slicing and printing the plate', () => {
     const input = inputOf(50, { infill_percent: 30 });
 
     await expect(
-      flow.print(input, { id: 'henry', name: 'Henry' }),
+      flow.print(input, henryPrinter, unchangedFor(input)),
     ).resolves.toBe(true);
 
     const [storage, name, body] = api.save.mock.calls[0] ?? [];
@@ -102,7 +110,7 @@ describe('slicing and printing the plate', () => {
 
     await flow.slice(inputOf());
     await flow.download(inputOf());
-    await flow.print(inputOf(), { id: 'henry', name: 'Henry' });
+    await flow.print(inputOf(), henryPrinter, unchangedFor(inputOf()));
     expect(api.save).toHaveBeenCalledTimes(1);
     expect(api.submit).toHaveBeenCalledTimes(1);
 
@@ -130,7 +138,7 @@ describe('slicing and printing the plate', () => {
     const flow = new PlateFlow(api, new AbortController().signal, 1);
 
     await expect(
-      flow.print(inputOf(), { id: 'henry', name: 'Henry' }),
+      flow.print(inputOf(), henryPrinter, unchangedFor(inputOf())),
     ).resolves.toBe(false);
     expect(api.print).not.toHaveBeenCalled();
     expect(flow.fault?.code).toBe('server-slicing/SLICER_FAILED');
@@ -148,6 +156,27 @@ describe('slicing and printing the plate', () => {
     expect(flow.step).toBe('idle');
   });
 
+  it('sends nothing when the plate, its settings or the printer changed during the slice', async () => {
+    for (const now of [
+      { signature: signatureOf(inputOf(60)), printer: 'henry' },
+      {
+        signature: signatureOf(inputOf(50, { walls: 4 })),
+        printer: 'henry',
+      },
+      { signature: signatureOf(inputOf()), printer: 'xl' },
+    ]) {
+      const api = recording();
+      const flow = new PlateFlow(api, new AbortController().signal, 1);
+      await expect(
+        flow.print(inputOf(), henryPrinter, () => now),
+      ).resolves.toBe(false);
+      expect(api.submit).toHaveBeenCalledTimes(1);
+      expect(api.print).not.toHaveBeenCalled();
+      expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
+      expect(flow.step).toBe('idle');
+    }
+  });
+
   it('keeps the printer’s refusal as the fault', async () => {
     const api = recording({
       print: vi.fn(() =>
@@ -157,7 +186,7 @@ describe('slicing and printing the plate', () => {
       ),
     });
     const flow = new PlateFlow(api, new AbortController().signal, 1);
-    await flow.print(inputOf(), { id: 'henry', name: 'Henry' });
+    await flow.print(inputOf(), henryPrinter, unchangedFor(inputOf()));
     expect(flow.fault?.code).toBe('core.printer/BUSY');
     expect(flow.notice).toBeUndefined();
   });

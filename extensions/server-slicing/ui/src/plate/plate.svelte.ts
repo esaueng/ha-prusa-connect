@@ -29,9 +29,6 @@ export const PLATE_MODES: readonly PlateMode[] = ['move', 'layflat'];
 /** How many steps Undo keeps. */
 export const UNDO_STEPS = 50;
 
-/** Where a copy that finds no free spot goes, beside the part it copies. */
-const COPY_OFFSET_MM = 10;
-
 const QUARTER_TURN = new Matrix4().makeRotationZ(Math.PI / 2);
 
 /** The scale a part may take, in percent of its size in the file. */
@@ -39,6 +36,20 @@ export const SCALE_PERCENT = { min: 1, max: 1000 } as const;
 
 /** Why parts were not added. */
 export type AddRefusal = 'tooManyTriangles';
+
+/** Two parts whose boxes overlap in all three directions. */
+const collide = (a: Part, b: Part): boolean => {
+  const ra = footprintOf(a);
+  const rb = footprintOf(b);
+  return (
+    ra.minX < rb.maxX &&
+    rb.minX < ra.maxX &&
+    ra.minY < rb.maxY &&
+    rb.minY < ra.maxY &&
+    a.z < b.z + b.size.height &&
+    b.z < a.z + a.size.height
+  );
+};
 
 export class Plate {
   #parts = $state.raw<readonly Part[]>([]);
@@ -50,6 +61,14 @@ export class Plate {
     const bed = this.#bedOf();
     return this.#parts
       .filter((part) => !bed || !insideBed(part, bed))
+      .map((part) => part.id);
+  });
+  #overlapping = $derived.by(() => {
+    const parts = this.#parts;
+    return parts
+      .filter((part) =>
+        parts.some((other) => other !== part && collide(part, other)),
+      )
       .map((part) => part.id);
   });
   #gesture: { before: readonly Part[]; moved: boolean } | undefined;
@@ -82,6 +101,14 @@ export class Plate {
   /** The parts that stand outside the print volume, or every part without one. */
   get outside(): readonly string[] {
     return this.#outside;
+  }
+
+  /**
+   * The parts whose boxes overlap another part's, at the same height. A box is
+   * wider than an outline, so this is a warning and the plate still prints.
+   */
+  get overlapping(): readonly string[] {
+    return this.#overlapping;
   }
 
   get bed(): STLBed | undefined {
@@ -143,6 +170,9 @@ export class Plate {
     }
     for (const mesh of read) if (!meshes.includes(mesh)) mesh.dispose();
 
+    // Undo records the plate before the new meshes join it, so the record
+    // cannot free them.
+    this.#record();
     const bed = this.#bedOf();
     const placed: Part[] = [];
     const taken = this.#parts.map(footprintOf);
@@ -171,7 +201,6 @@ export class Plate {
       placed.push(part);
     }
 
-    this.#record();
     this.#parts = [...this.#parts, ...placed];
     this.#selected = placed.map((part) => part.id);
     return undefined;
@@ -292,8 +321,8 @@ export class Plate {
   }
 
   /**
-   * Arranges every part, or only the selected ones around the others. It
-   * answers how many parts found no free spot; those keep where they were.
+   * Arranges every part, or only the selected ones around the others. When a
+   * part finds no free spot nothing moves, and it answers how many found none.
    */
   arrange(scope: 'all' | 'selection'): number {
     const bed = this.#bedOf();
@@ -307,45 +336,49 @@ export class Plate {
       .filter((part) => !moving.includes(part))
       .map(footprintOf);
     const { placed, unplaced } = arrange(moving, fixed, bed);
+    // A part with no room would stay where it is, under the spot another
+    // part was moved to, so nothing moves unless every part has room.
+    if (unplaced.length > 0) return unplaced.length;
     this.#record();
     this.#parts = this.#parts.map((part) => {
       const at = placed.get(part.id);
       return at ? { ...part, x: at[0], y: at[1], z: 0 } : part;
     });
-    return unplaced.length;
+    return 0;
   }
 
   /**
    * Adds a copy of each selected part in free space and selects the copies.
-   * A copy with no free spot stands beside its part, outside the volume or on
-   * another part, so it shows in red. It answers how many copies were added.
+   * When a copy has no free spot, or the copies would take the plate over its
+   * triangles, nothing is added and it answers why.
    */
-  copy(): number {
+  copy(): number | AddRefusal | 'noRoom' {
     const sources = this.selection;
     if (sources.length === 0) return 0;
     const incoming = sources.reduce(
       (total, part) => total + triangleCount(part.geometry),
       0,
     );
-    if (this.triangles + incoming > MAX_TRIANGLES) return 0;
+    if (this.triangles + incoming > MAX_TRIANGLES) return 'tooManyTriangles';
 
     const bed = this.#bedOf();
+    if (!bed) return 'noRoom';
     const taken = this.#parts.map(footprintOf);
-    const copies = sources.map((part) => {
-      const at = (bed && findFree(part.size, taken, bed, [part.x, part.y])) ?? [
-        part.x + COPY_OFFSET_MM,
-        part.y + COPY_OFFSET_MM,
-      ];
+    const copies: Part[] = [];
+    for (const part of sources) {
+      const at = findFree(part.size, taken, bed, [part.x, part.y]);
+      if (!at) return 'noRoom';
       const copy: Part = {
         ...part,
-        id: `part-${String(this.#next++)}`,
+        id: `part-${String(this.#next + copies.length)}`,
         x: at[0],
         y: at[1],
         z: 0,
       };
       taken.push(footprintOf(copy));
-      return copy;
-    });
+      copies.push(copy);
+    }
+    this.#next += copies.length;
     this.#record();
     this.#parts = [...this.#parts, ...copies];
     this.#selected = copies.map((part) => part.id);
@@ -361,6 +394,7 @@ export class Plate {
     const present = previous.map((part) => part.id);
     const kept = this.#selected.filter((id) => present.includes(id));
     if (kept.length !== this.#selected.length) this.#selected = kept;
+    this.#collect();
   }
 
   /** Frees every mesh the plate holds, for a workspace that closes. */
@@ -385,5 +419,22 @@ export class Plate {
 
   #push(parts: readonly Part[]): void {
     this.#history = [...this.#history, parts].slice(-UNDO_STEPS);
+    this.#collect();
+  }
+
+  /**
+   * Frees each mesh that no part and no Undo step holds any more: one whose
+   * last part was removed and whose step has dropped off the end of Undo, or
+   * one a step after an Undo held.
+   */
+  #collect(): void {
+    const held = [this.#parts, ...this.#history].flatMap((parts) =>
+      parts.map((part) => part.geometry),
+    );
+    for (const mesh of [...this.#meshes]) {
+      if (held.includes(mesh)) continue;
+      mesh.dispose();
+      this.#meshes.splice(this.#meshes.indexOf(mesh), 1);
+    }
   }
 }

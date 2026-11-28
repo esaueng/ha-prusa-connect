@@ -150,15 +150,27 @@ export class PlateFlow {
     });
   }
 
-  /** Slices the plate if it changed, then sends it to an idle printer and starts it. */
+  /**
+   * Slices the plate if it changed, then sends it to an idle printer and
+   * starts it. Saving and slicing take a while, and the person may change the
+   * plate, its settings or the printer meanwhile. `current` answers the plate
+   * and the printer as they are now; when either is no longer the one sliced,
+   * nothing is sent and the notice says so.
+   */
   async print(
     input: PlateInput,
     printer: { id: string; name: string },
+    current: () => { signature: string; printer: string | undefined },
   ): Promise<boolean> {
     const ok = await this.#run(async () => {
       const job = await this.#slicedJob(input);
       const result = job.result;
       if (!result) throw new Error('The job wrote no G-code');
+      const now = current();
+      if (now.signature !== signatureOf(input) || now.printer !== printer.id) {
+        this.#notice = { key: 'slicer.plate.notice.changed', params: {} };
+        return false;
+      }
       this.#step = 'sending';
       await this.#api.print({
         deviceId: printer.id,
