@@ -12,15 +12,17 @@
     "format:check": "prettier --check .",
     "check:svelte": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "vitest run",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run check:svelte && pnpm run check:stories && pnpm run test",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run check:svelte && pnpm run check:stories && pnpm run check:vendor && pnpm run test",
     "storybook": "storybook dev -p 6007",
     "build-storybook": "storybook build -o storybook-static",
-    "check:stories": "node scripts/check-stories.mjs"
+    "check:stories": "node scripts/check-stories.mjs",
+    "check:vendor": "node scripts/remus-vendor.mjs check && node --test scripts/remus-vendor.test.mjs"
   },
   "dependencies": {
     "@lucide/svelte": "1.58.0",
     "@prusa/connect": "0.1.0",
     "@prusa/connect-ui": "0.1.0",
+    "remus-wasm-io": "link:vendor/remus-wasm-io",
     "server-slicing-client": "link:../client",
     "three": "0.186.1"
   },

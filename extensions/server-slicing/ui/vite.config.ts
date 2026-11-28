@@ -21,6 +21,11 @@ const LOCALES = fileURLToPath(new URL('./src/locales/', import.meta.url));
 const THREE_LICENSE = fileURLToPath(
   new URL('../LICENSE', import.meta.resolve('three')),
 );
+// The Remus translator that reads STEP files, copied into this package with
+// its licence and notice. vendor/remus-wasm-io/README.md says from where.
+const REMUS = fileURLToPath(
+  new URL('./vendor/remus-wasm-io/', import.meta.url),
+);
 
 /**
  * Puts the module's own manifest at the root of the bundle, which is where the
@@ -45,6 +50,11 @@ const bundleManifest = () => ({
     handler: () => {
       copyFileSync(MANIFEST, `${BUNDLE_ROOT}module.yaml`);
       copyFileSync(THREE_LICENSE, `${BUNDLE_ROOT}ui/three-license.txt`);
+      copyFileSync(
+        `${REMUS}LICENSE-APACHE`,
+        `${BUNDLE_ROOT}ui/remus-license.txt`,
+      );
+      copyFileSync(`${REMUS}NOTICE`, `${BUNDLE_ROOT}ui/remus-notice.txt`);
       // The catalogues, beside the entry. The host reads
       // `locales/<lang>.json` next to `entry_url` and merges what it finds
       // under this module's namespace (frontend-i18n.md rule 7).
@@ -57,5 +67,9 @@ const bundle = moduleBuild({ entry: 'src/index.ts', outDir: 'dist/ui' });
 
 export default {
   ...bundle,
+  // The STEP reader runs in a worker, which the build writes as its own file
+  // under assets/. A relative base makes the entry find it beside itself under
+  // the module's mount, rather than at the root of the origin.
+  base: './',
   plugins: [...(bundle.plugins ?? []), bundleManifest()],
 };

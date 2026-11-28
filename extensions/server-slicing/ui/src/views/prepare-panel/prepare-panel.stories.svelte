@@ -123,6 +123,43 @@
     api: { ...testPrepare, read: () => loadFixture('bambu-unknown-role.3mf') },
   }}
 />
+<Story
+  name="STEP assembly in inches"
+  args={{
+    source: 'local:block-and-peg-inch.step',
+    api: {
+      ...testPrepare,
+      read: () => loadFixture('block-and-peg-inch.step'),
+    },
+  }}
+/>
+<Story
+  name="STEP mesh over the triangle limit"
+  args={{
+    source: 'local:large-ball.step',
+    api: { ...testPrepare, read: () => loadFixture('large-ball.step') },
+  }}
+/>
+<Story
+  name="STEP file with no solid"
+  args={{
+    source: 'local:no-solid.step',
+    api: { ...testPrepare, read: () => loadFixture('no-solid.step') },
+  }}
+/>
+<Story
+  name="STEP file Remus refuses"
+  args={{
+    source: 'local:part.step',
+    api: {
+      ...testPrepare,
+      read: () =>
+        Promise.resolve(
+          new File(['ISO-10303-21;\nHEADER;\nnot STEP'], 'part.step'),
+        ),
+    },
+  }}
+/>
 <Story name="No saved profile" args={{ beds: {}, profileSettings: {} }} />
 <Story name="No PrusaSlicer 2" args={{ hasSlicer: false }} />
 <Story name="No printers" args={{ devices: [] }} />

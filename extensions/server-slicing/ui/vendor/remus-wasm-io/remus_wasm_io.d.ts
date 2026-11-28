@@ -1,0 +1,224 @@
+/* tslint:disable */
+/* eslint-disable */
+
+/**
+ * A native BREP import attempt with an explicit unsupported-geometry verdict.
+ *
+ * Malformed input, exceeded budgets and invalid topology still return errors.
+ * Only an unsupported carrier or layout permits a consumer's format fallback.
+ * An unsupported result does not certify the input; the alternate converter
+ * must independently validate its input and result.
+ */
+export class BrepImportResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Exact arena document, or empty bytes when `supported` is false.
+     */
+    readonly solids: Uint8Array;
+    /**
+     * Whether the native reader imported and strictly validated every root.
+     */
+    readonly supported: boolean;
+    /**
+     * Human-readable support boundary. Use `supported` to choose a fallback;
+     * this text is diagnostic, not a stable machine-readable contract.
+     */
+    readonly unsupportedReason: string | undefined;
+}
+
+/**
+ * The translator. Stateless: every call works in a fresh scratch topology.
+ */
+export class RemusIo {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Tessellate the solids of an arena document into one 3MF package.
+     */
+    export3mf(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Tessellate the solids of an arena document into one glTF binary.
+     */
+    exportGlb(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Write the solids of an arena document as IGES (UTF-8 bytes).
+     */
+    exportIges(bodies: Uint8Array): Uint8Array;
+    /**
+     * Write the solids of an arena document as exact IGES 5.3 manifold
+     * solid B-rep objects (UTF-8 bytes), in millimetres.
+     *
+     * `options` is a JSON string with `fileName`, `productName`,
+     * `timestamp` (`YYYYMMDD.HHMMSS`) and `unit` (`MM`, `CM`, `M` or `IN`:
+     * the unit the geometry is already in, stated, not applied) fields;
+     * missing fields keep their defaults. Carriers keep their exact class; a closed edge with no
+     * carrier is refused.
+     */
+    exportIgesBrep(bodies: Uint8Array, options?: string | null): Uint8Array;
+    /**
+     * Tessellate the solids of an arena document into one OBJ (UTF-8 bytes).
+     */
+    exportObj(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Tessellate the solids of an arena document into one binary PLY.
+     */
+    exportPly(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Write the bodies of an arena document as STEP AP203 (UTF-8 bytes).
+     *
+     * Accepts solid documents (`serializeSolids`) and sheet documents
+     * (`serializeSheets`); several roots become distinct bodies in one file.
+     */
+    exportStep(bodies: Uint8Array): Uint8Array;
+    /**
+     * [`exportStep`](Self::export_step) with optional header metadata.
+     *
+     * `options` is a JSON string with `productName`, `fileName`,
+     * `timestamp`, and `validationProperties` fields; missing fields keep
+     * their defaults.
+     */
+    exportStepWithOptions(bodies: Uint8Array, options?: string | null): Uint8Array;
+    /**
+     * Tessellate the solids of an arena document into one binary STL.
+     */
+    exportStl(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Tessellate the solids of an arena document into one ASCII STL.
+     */
+    exportStlAscii(bodies: Uint8Array, deflection: number): Uint8Array;
+    /**
+     * Restate an IGES file's 186 solids as ISO 10303-21 text in millimetres
+     * (UTF-8 bytes): exactly what `importIgesBrep` builds its solids from.
+     * A consumer that stores STEP sources can keep this as an IGES import's
+     * replayable source; `importStepBodies` on it gives `importIgesBrep`'s
+     * solids. Refuses what `importIgesBrep` refuses before any geometry.
+     */
+    igesBrepAsStep(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read a 3MF package; every build item becomes a solid root of one
+     * document, in build order and placed by its item transform (an object
+     * listed twice gives two solids). Without build items, every object no
+     * component references is a root.
+     */
+    import3mf(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read qualified planar/cylindrical ASCII BREP saved solids in millimetres.
+     * Returns an exact solid document for `deserializeSolids`.
+     * Unsupported geometry or placements refuse the whole call.
+     * Optional budgets only tighten production limits; this first reader
+     * also caps aggregate records/references at 16,384.
+     */
+    importBrep(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read a glTF binary into one mesh-backed solid document.
+     */
+    importGlb(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read an IGES file; returns a solid document, or no bytes when empty.
+     */
+    importIges(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read every IGES 5.3 manifold solid B-rep object (type 186) as an
+     * exact solid; returns a solid document for `deserializeSolids`.
+     *
+     * The qualified IGES path (`importIges` remains a lossy preview). Reads
+     * planes, cylinders, cones, spheres, tori (190–198) and B-spline
+     * surfaces (128) with 110/100/104/126 edges, rigid 124 frames and the
+     * declared unit, and builds them through the strict STEP body reader.
+     * A surface model (trimmed surfaces with no 186 solid), other entity
+     * types and non-rigid frames are refused by name.
+     */
+    importIgesBrep(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Build a mesh-backed solid document from flat `[x,y,z,...]` positions
+     * and `[i0,i1,i2,...]` triangle indices.
+     */
+    importIndexedMesh(positions: Float64Array, indices: Uint32Array): Uint8Array;
+    /**
+     * Read an OBJ file into one mesh-backed solid document.
+     */
+    importObj(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read a PLY file into one mesh-backed solid document.
+     */
+    importPly(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read a STEP file; returns a solid document for `deserializeSolids`,
+     * or no bytes when the file holds no solids.
+     *
+     * `maxInputBytes` / `maxEntities` optionally tighten the hostile-input
+     * resource budgets below the production defaults (256 MiB / 3,000,000).
+     */
+    importStep(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Read every supported STEP body root: solids and sheets, each as its
+     * own document, with bounded-healing diagnostics in the report.
+     */
+    importStepBodies(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): StepImportResult;
+    /**
+     * Read a STEP file's solids with their product structure.
+     *
+     * Every product occurrence is a node of `report.structure.nodes`
+     * (`name`, `parent`), parents first. Every placed occurrence of a solid
+     * is its own root of `solids`, moved by its composed placement, so a
+     * repeated part comes back once per occurrence. `report.structure.solids`
+     * gives each root's `node`, its own `name`, and its surface `color` and
+     * uniform `faceColor` (sRGB, `[0, 1]`); the colours also travel as
+     * attributes in the arena document. Styles it cannot apply are counted in
+     * `report.structure.presentation`, never refused. Unlike the flat readers,
+     * an assembly's parts come back where the assembly places them.
+     */
+    importStepStructure(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): StepImportResult;
+    /**
+     * Read a STEP file's solids with bounded-healing diagnostics.
+     */
+    importStepWithReport(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): StepImportResult;
+    /**
+     * Read STEP and check CAx-IF geometric validation properties.
+     *
+     * The report carries one `validation` entry per solid. `options` accepts
+     * the camelCase fields of the STEP validation options.
+     */
+    importStepWithValidation(data: Uint8Array, options?: string | null, max_input_bytes?: number | null, max_entities?: number | null): StepImportResult;
+    /**
+     * Read an STL file (binary or ASCII) into one mesh-backed solid document.
+     */
+    importStl(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): Uint8Array;
+    /**
+     * Create a translator.
+     */
+    constructor();
+    /**
+     * Try native BREP import without interpreting diagnostic text.
+     * `supported=false` permits a separate format converter; malformed input,
+     * invalid geometry and exceeded limits remain errors, with no result.
+     * Budgets and strict validation are identical to `importBrep`.
+     */
+    tryImportBrep(data: Uint8Array, max_input_bytes?: number | null, max_entities?: number | null): BrepImportResult;
+}
+
+/**
+ * Bodies restored from a STEP file, plus the reader's report.
+ */
+export class StepImportResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * JSON: `solidCount`, `sheetCount`, `diagnostics`, and `validation`
+     * when validation properties were requested.
+     */
+    readonly report: string;
+    /**
+     * Sheet roots as an arena document for `RemusKernel.deserializeSheets`.
+     * Empty when the file held no sheets.
+     */
+    readonly sheets: Uint8Array;
+    /**
+     * Solid roots as an arena document for `RemusKernel.deserializeSolids`.
+     * Empty when the file held no solids.
+     */
+    readonly solids: Uint8Array;
+}
