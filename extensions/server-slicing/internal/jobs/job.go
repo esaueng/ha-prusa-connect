@@ -22,6 +22,7 @@ import (
 	"github.com/prusa3d/server-slicing/internal/gcodemeta"
 	"github.com/prusa3d/server-slicing/internal/project"
 	"github.com/prusa3d/server-slicing/internal/runner"
+	"github.com/prusa3d/server-slicing/internal/settings"
 )
 
 // State is where a job is.
@@ -168,6 +169,8 @@ type Job struct {
 	Format        runner.Format     `json:"format,omitempty"`
 	Overwrite     bool              `json:"overwrite"`
 	KeepPlacement bool              `json:"keep_placement,omitempty"`
+	// Settings change the saved STL profile for this job alone.
+	Settings *settings.PrintSettings `json:"settings,omitempty"`
 
 	CreatedAt  time.Time  `json:"created_at"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`

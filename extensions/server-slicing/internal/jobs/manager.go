@@ -24,6 +24,7 @@ import (
 	"github.com/prusa3d/server-slicing/internal/install"
 	"github.com/prusa3d/server-slicing/internal/project"
 	"github.com/prusa3d/server-slicing/internal/runner"
+	"github.com/prusa3d/server-slicing/internal/settings"
 )
 
 // Files is the part of the host's storage door the jobs use.
@@ -94,6 +95,7 @@ type Request struct {
 	Format        runner.Format
 	Overwrite     bool
 	KeepPlacement bool
+	Settings      *settings.PrintSettings
 }
 
 // RefusalError is a request the jobs did not take.
@@ -301,7 +303,8 @@ func (m *Manager) check(ctx context.Context, request Request) (*Job, error) {
 	return &Job{
 		ID: newID(), State: Queued, Progress: 0, By: request.By,
 		Source: source, Output: output, Slicer: request.Slicer, Profile: request.Profile, Selection: request.Selection,
-		Format: request.Format, Overwrite: request.Overwrite, KeepPlacement: request.KeepPlacement, CreatedAt: now,
+		Format: request.Format, Overwrite: request.Overwrite, KeepPlacement: request.KeepPlacement,
+		Settings: request.Settings, CreatedAt: now,
 	}, nil
 }
 
@@ -431,7 +434,7 @@ func (m *Manager) places(ctx context.Context, request Request) (Source, Target, 
 func (m *Manager) checkSourceFormat(source Source, request Request) error {
 	switch strings.ToLower(path.Ext(source.Name())) {
 	case ".3mf":
-		if request.Profile != "" || request.KeepPlacement {
+		if request.Profile != "" || request.KeepPlacement || request.Settings != nil {
 			return refuse(CodeInvalid, "a 3MF project carries its own settings and placement")
 		}
 	case ".stl":
@@ -440,6 +443,11 @@ func (m *Manager) checkSourceFormat(source Source, request Request) error {
 		}
 		if !request.Selection.Whole() {
 			return refuse(CodeInvalid, "an STL file has no setup, bed or item selection")
+		}
+		if request.Settings != nil {
+			if err := request.Settings.Check(); err != nil {
+				return refuse(CodeInvalid, "%s", strings.TrimPrefix(err.Error(), settings.ErrInvalid.Error()+": "))
+			}
 		}
 	default:
 		return refuse(CodeNotAProject, "%s is not a .3mf or .stl file", source.Name())

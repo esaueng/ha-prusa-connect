@@ -86,6 +86,8 @@ type State struct {
 	Selections  bool
 	STLProfiles []string
 	PrepareBeds map[string]settings.STLBed
+	// PrepareSettings are the starting print settings of each saved profile.
+	PrepareSettings map[string]settings.ProfileSettings
 	// Background is the context installs run under, which ends when the
 	// module stops rather than when the request does.
 	Background context.Context
@@ -206,6 +208,7 @@ func (s Service) listSlicers(w http.ResponseWriter, r *http.Request, state State
 	view := state.Slicers.View(err == nil && administrator)
 	view.STLProfiles = state.STLProfiles
 	view.PrepareBeds = state.PrepareBeds
+	view.PrepareSettings = state.PrepareSettings
 	answer(w, http.StatusOK, view)
 }
 
@@ -349,6 +352,8 @@ type SubmitBody struct {
 	Format        runner.Format     `json:"format"`
 	Overwrite     bool              `json:"overwrite"`
 	KeepPlacement bool              `json:"keep_placement"`
+	// Settings change the saved STL profile for this job alone.
+	Settings *settings.PrintSettings `json:"settings"`
 }
 
 func (s Service) submit(w http.ResponseWriter, r *http.Request, state State, by string) {
@@ -366,6 +371,7 @@ func (s Service) submit(w http.ResponseWriter, r *http.Request, state State, by 
 	job, err := state.Jobs.Submit(r.Context(), jobs.Request{
 		By: by, Source: body.Source, Output: body.Output, Slicer: body.Slicer, Profile: body.Profile,
 		Selection: body.Selection, Format: body.Format, Overwrite: body.Overwrite, KeepPlacement: body.KeepPlacement,
+		Settings: body.Settings,
 	})
 	taken(w, job, err)
 }

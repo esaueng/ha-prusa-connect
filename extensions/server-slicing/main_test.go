@@ -159,8 +159,16 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 	var versions slicers.View
 	if status := r.as(t, alice, http.MethodGet, "/slicers", nil, &versions); status != http.StatusOK ||
 		len(versions.STLProfiles) != 1 || versions.STLProfiles[0] != name ||
-		versions.PrepareBeds[name] != (settings.STLBed{MaxX: 200, MaxY: 200, Height: 200}) {
-		t.Fatalf("the profile listing answered %d, %v, %v", status, versions.STLProfiles, versions.PrepareBeds)
+		versions.PrepareBeds[name] != (settings.STLBed{MaxX: 200, MaxY: 200, Height: 200}) ||
+		versions.PrepareSettings[name].FilamentType != "PETG" ||
+		versions.PrepareSettings[name].LayerHeightMM == nil || *versions.PrepareSettings[name].LayerHeightMM != 0.2 {
+		t.Fatalf("the profile listing answered %d, %v, %v, %+v",
+			status, versions.STLProfiles, versions.PrepareBeds, versions.PrepareSettings)
+	}
+	if status := r.as(t, alice, http.MethodPost, "/jobs", []byte(
+		`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg","settings":{"walls":0}}`,
+	), nil); status != http.StatusBadRequest {
+		t.Fatalf("a job with no walls answered %d, want 400", status)
 	}
 	var job jobs.Job
 	if status := r.as(
@@ -169,7 +177,8 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 		http.MethodPost,
 		"/jobs",
 		[]byte(
-			`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg","keep_placement":true}`,
+			`{"source":{"storage":"shelf","path":"models/box.stl"},"profile":"core-one-petg","keep_placement":true,`+
+				`"settings":{"layer_height_mm":0.1,"supports":"build_plate","infill_percent":30}}`,
 		),
 		&job,
 	); status != http.StatusAccepted {
@@ -177,7 +186,8 @@ func TestAnSTLUsesTheProfileFromTheJobRequest(t *testing.T) {
 	}
 
 	done := r.waitJob(t, job.ID)
-	if done.State != jobs.Done || done.Profile != name || !done.KeepPlacement {
+	if done.State != jobs.Done || done.Profile != name || !done.KeepPlacement || done.Settings == nil ||
+		done.Settings.Supports != settings.SupportsBuildPlate || *done.Settings.InfillPercent != 30 {
 		t.Fatalf("the STL job ended as %+v", done)
 	}
 	written, ok := r.host.File(done.Result.Path)

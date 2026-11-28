@@ -4,6 +4,12 @@ What changed in this module, newest first. The top heading is the version
 `module.yaml` declares and the version this process reports to the host, and
 `changelog_test.go` fails when the three differ.
 
+## 0.6.0 - 2026-11-28
+
+### Added
+
+- An STL job may change the layer height, the infill, the walls, the supports and the brim of its saved profile, sent as `settings` in `POST /jobs`. `GET /slicers` lists what each saved profile prints with under `prepare_settings`.
+
 ## 0.5.0 - 2026-11-28
 
 ### Added

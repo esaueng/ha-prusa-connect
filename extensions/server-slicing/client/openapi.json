@@ -355,6 +355,13 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/STLBed"
             }
+          },
+          "prepare_settings": {
+            "type": "object",
+            "description": "The starting print settings, indexed by saved STL profile name.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProfileSettings"
+            }
           }
         },
         "required": [
@@ -531,6 +538,9 @@
           "keep_placement": {
             "type": "boolean",
             "description": "Keep the XY coordinates of an STL model on the build plate."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/PrintSettings"
           }
         },
         "required": [
@@ -874,6 +884,9 @@
           "keep_placement": {
             "type": "boolean",
             "description": "Keep the XY coordinates of an STL model on the build plate."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/PrintSettings"
           }
         },
         "required": [
@@ -1008,6 +1021,62 @@
           "max_x",
           "max_y",
           "height"
+        ]
+      },
+      "PrintSettings": {
+        "type": "object",
+        "description": "Settings that change a saved STL profile for one job. An absent field keeps the profile's value.",
+        "properties": {
+          "layer_height_mm": {
+            "type": "number",
+            "minimum": 0.05,
+            "maximum": 0.6,
+            "description": "The layer height in millimetres. A layer thicker than the nozzle is wide fails in the slicer."
+          },
+          "infill_percent": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "The infill density, in percent."
+          },
+          "walls": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "How many perimeters each layer has."
+          },
+          "supports": {
+            "type": "string",
+            "enum": [
+              "off",
+              "build_plate",
+              "everywhere"
+            ],
+            "description": "Where the slicer may add support material: nowhere, only where it stands on the build plate, or everywhere."
+          },
+          "brim_width_mm": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "The width of the brim around the first layer, in millimetres. 0 prints no brim."
+          }
+        }
+      },
+      "ProfileSettings": {
+        "description": "What a saved STL profile prints with before a person changes anything. A value the profile does not state is absent.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PrintSettings"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "filament_type": {
+                "type": "string",
+                "description": "The material of the profile's first extruder, such as PETG."
+              }
+            }
+          }
         ]
       }
     },

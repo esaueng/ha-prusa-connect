@@ -85,6 +85,21 @@ In **Storage**, choose **Slice** for an STL and select a profile. A REST
 client sends the same name as `profile` in the job body or the upload
 query. The default output name includes the chosen profile.
 
+A job may change some settings of the profile for that job alone. It sends
+them as `settings` in the body of `POST /jobs`. Each one it leaves out keeps
+the profile's value.
+
+| field | what it changes |
+|---|---|
+| `layer_height_mm` | the layer height, from 0.05 to 0.6 mm |
+| `infill_percent` | the infill density, from 0 to 100 |
+| `walls` | the perimeters of each layer, from 1 to 20 |
+| `supports` | `off`, `build_plate` for supports that stand on the bed only, or `everywhere` |
+| `brim_width_mm` | the brim, from 0 to 50 mm. 0 prints no brim |
+
+`GET /slicers` answers what each profile prints with before a change, under
+`prepare_settings`, with the material of its first extruder.
+
 Profiles take a complete config for a filament printer. Clear any
 post-processing scripts before exporting. Keep a PrusaSlicer 2.x binary
 installed to run STL jobs with these profiles.
