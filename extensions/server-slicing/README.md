@@ -107,12 +107,12 @@ installed to run STL jobs with these profiles.
 ### Prepare a plate and print it
 
 **Slicing** opens on the build plate of a printer. **Open in slicer** on an
-STL in Storage opens it there too. The row of tools above the plate has, in
+STL or STEP file in Storage opens it there too. The row of tools above the plate has, in
 order:
 
 | tool | does |
 |---|---|
-| **Add** | opens STL and 3MF files. Files dropped on the plate are added too |
+| **Add** | opens STL, 3MF and STEP files. Files dropped on the plate are added too |
 | **Move** | a part follows the pointer. Shift-click adds a part to the selection |
 | **Lay flat** | the flat face under the pointer lights up. A click turns the part so that face lies on the bed |
 | **Arrange** | arranges every part, or only the selected ones around the others, or adds a copy of the selection in free space |
@@ -127,7 +127,7 @@ The keys R, Delete and Ctrl+Z (⌘Z on a Mac) turn the selection by 90°,
 remove it, and take the last change back. A part that is outside the print
 volume turns red, and the plate does not print until it fits.
 
-A new STL goes to free space on the bed. Each object of a 3MF is a part of
+A new STL or STEP part goes to free space on the bed. Each object of a 3MF is a part of
 its own, in the position stored in the file. A part below the bed is lifted
 onto it, and a part that stands on another keeps its height. Arrange and
 **Add a copy** read each part as the rectangle around it, so an L-shaped part
@@ -172,6 +172,40 @@ export the solid model as STL or geometry-only 3MF.
 
 A plate holds files up to 20 MiB each and 300,000 triangles in all, copies
 included. A 3MF archive can expand to 64 MiB.
+
+#### STEP files
+
+The browser reads a STEP file with
+[Remus](https://github.com/esaueng/remus), a B-rep kernel compiled to
+WebAssembly. A B-rep is a solid stored as its exact surfaces. Remus places
+every body where the file's assembly puts it and converts the file's length
+unit, such as inches, to millimetres. It then turns the surfaces into
+triangles. All the bodies of one file become one part, because Remus writes
+them as one mesh.
+
+**STEP mesh (mm)** appears in the tool row once a STEP file has been added. It
+is the largest distance between a triangle and the exact surface: 0.01 mm
+unless you enter another value from 0.001 to 1 mm. It applies to STEP files
+added after it changes. A smaller tolerance gives more triangles. A file
+whose mesh has more than 300,000 triangles, or that takes longer than one
+minute, is not added, and the plate asks for a larger tolerance. Remus also
+limits how finely it divides a curve, by an angle it fixes itself.
+
+Remus refuses a file it cannot read exactly and the plate gives its reason. A
+file that holds only surfaces or only a tessellated shape has no solid and is
+refused too.
+
+Remus runs in a Web Worker, `ui/assets/step-worker-<hash>.js` in the bundle,
+of about 5.9 MB. The browser loads it for each STEP file and stops it when
+the mesh arrives or the page closes, so the page stays responsive and Remus's
+memory is freed. The WebAssembly travels inside the worker's script, because
+a module reaches the network only through the SDK.
+
+Remus publishes no package. `ui/vendor/remus-wasm-io` holds its translator
+copied byte for byte from one commit, with the SHA-256 of each file.
+`pnpm run check` holds the copy to those sums.
+[ui/vendor/remus-wasm-io/README.md](ui/vendor/remus-wasm-io/README.md) says
+where the files come from and how to update them.
 
 A slicer uses a lot of memory, so the module asks the host for 2560 MiB
 (`needs.memory_mib` in `module.yaml`). The operator overrides that figure per instance as `memory_mib` on the resource spec (ADR-20261027-5m4).

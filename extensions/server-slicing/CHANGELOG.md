@@ -4,11 +4,17 @@ What changed in this module, newest first. The top heading is the version
 `module.yaml` declares and the version this process reports to the host, and
 `changelog_test.go` fails when the three differ.
 
-## 0.7.1 - 2026-11-28
+## 0.8.1 - 2026-11-28
 
 ### Fixed
 
 - A print whose plate or printer changed during the upload or the job's creation still sliced the plate. A request the connection dropped could also be sent again. The print now stops before each of those steps, and a request it stops is not sent again. A drag that ends where it began no longer adds an Undo step.
+
+## 0.8.0 - 2026-11-28
+
+### Added
+
+- Add a STEP file (`.step` or `.stp`) to the build plate, or open one from Storage with **Open in slicer**. The browser meshes its solids in millimetres at a tolerance you can change, as one part.
 
 ## 0.7.0 - 2026-11-28
 

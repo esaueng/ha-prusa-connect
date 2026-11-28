@@ -5,13 +5,18 @@
   sliced on this server and sent to the printer.
 -->
 <script lang="ts">
-  import { FileUp } from '@lucide/svelte';
+  import { FileUp, X } from '@lucide/svelte';
   import {
     describeFault,
     type FaultText,
     type MessageParams,
   } from '@prusa/connect-ui/i18n';
-  import { FaultAlert, Input } from '@prusa/connect-ui/primitives';
+  import {
+    Button,
+    FaultAlert,
+    Input,
+    Label,
+  } from '@prusa/connect-ui/primitives';
   import type { Device } from '@prusa/connect-ui/domain';
   import { parseFileRef } from '@prusa/connect-ui/slots';
   import { onMount, untrack } from 'svelte';
@@ -44,6 +49,11 @@
   import { PrintSettingsMenu } from '../print-settings';
   import { PrinterPicker } from '../printer-picker';
   import { ModelLimitError } from './import-limits';
+  import {
+    STEP_TOLERANCE_MM,
+    StepError,
+    StepMeshLimitError,
+  } from './import-step';
   import { readMeshFile } from './mesh-import';
   import type { Destination, PrepareApi } from './prepare-api';
   import { ThreeMFRoleError } from './three-mf-roles';
@@ -81,7 +91,7 @@
   } = $props();
 
   // The file types the readers in mesh-import.ts take.
-  const ACCEPT = '.stl,.3mf';
+  const ACCEPT = '.stl,.3mf,.step,.stp';
 
   const id = $props.id();
   const controller = new AbortController();
@@ -99,6 +109,36 @@
   let reads: Promise<void> = Promise.resolve();
   const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
+  /** One note about a file, and the parts reading that file put on the plate. */
+  interface ImportNote {
+    readonly id: number;
+    readonly batch: number;
+    readonly text: string;
+    readonly parts: readonly string[];
+  }
+  /**
+   * What each batch said about its files, named by file. A batch sets only
+   * its own notes. A note is shown while one of its parts is on the plate, so
+   * deleting the parts hides it and Undo brings it back; a note with no parts
+   * stays until it is dismissed.
+   */
+  let importNotes = $state.raw<readonly ImportNote[]>([]);
+  let noteCount = 0;
+  const shownNotes = $derived.by(() => {
+    const onPlate = new Set(plate.parts.map((part) => part.id));
+    return importNotes.filter(
+      (note) =>
+        note.parts.length === 0 || note.parts.some((id) => onPlate.has(id)),
+    );
+  });
+  const dismiss = (id: number): void => {
+    importNotes = importNotes.filter((note) => note.id !== id);
+  };
+  let batchCount = 0;
+  /** The STEP mesh tolerance for files added from now on, in mm. */
+  let tolerance = $state(STEP_TOLERANCE_MM);
+  /** A STEP file was added or refused, so its tolerance is shown. */
+  let stepUsed = $state(false);
   let notice = $state<{ key: string; params: MessageParams }>();
   let destinations = $state.raw<Destination[]>([]);
   let destinationFault = $state<FaultText>();
@@ -236,13 +276,20 @@
    * file that cannot be read is named in the faults, and the others are still
    * added.
    */
-  const load = (files: readonly (Promise<File> | File)[]): Promise<void> => {
+  const load = (
+    files: readonly (Promise<File> | File)[],
+    names: readonly string[] = [],
+  ): Promise<void> => {
     if (batches === 0) {
       modelFaults = [];
       notice = undefined;
     }
     batches += 1;
-    const read = reads.then(() => readBatch(files));
+    batchCount += 1;
+    const batch = batchCount;
+    // A file is meshed at the tolerance shown when it was added.
+    const atTolerance = tolerance;
+    const read = reads.then(() => readBatch(files, names, atTolerance, batch));
     reads = read.finally(() => {
       batches -= 1;
     });
@@ -252,22 +299,35 @@
   /** True once the workspace closed. A function, so each wait reads it anew. */
   const closed = (): boolean => controller.signal.aborted;
 
+  /**
+   * `names` holds the name of a file that is not here yet, such as one read
+   * from Storage, so a file that fails while it is read is still named.
+   */
   const readBatch = async (
     files: readonly (Promise<File> | File)[],
+    names: readonly string[],
+    atTolerance: number,
+    batch: number,
   ): Promise<void> => {
     const faults: string[] = [];
-    let threeMF = false;
-    for (const file of files) {
+    const notes: { text: string; parts: readonly string[] }[] = [];
+    for (const [at, file] of files.entries()) {
       // A batch that waited for another may start after the page closed.
       if (closed()) return;
       let reading = true;
-      let name = '';
+      let name = names[at] ?? '';
+      stepUsed ||= isStep(name);
       try {
         const loaded = await file;
         if (closed()) return;
         reading = false;
         name = loaded.name;
-        const imported = await readMeshFile(loaded);
+        stepUsed ||= isStep(loaded.name);
+        // The workspace's signal stops a STEP worker when the page closes.
+        const imported = await readMeshFile(loaded, {
+          tolerance: atTolerance,
+          signal: controller.signal,
+        });
         if (closed()) {
           for (const part of imported.parts) part.geometry.dispose();
           return;
@@ -281,17 +341,73 @@
           );
           continue;
         }
-        threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
+        // The plate selects exactly the parts it has just added.
+        const parts = plate.selected;
+        if (loaded.name.toLowerCase().endsWith('.3mf'))
+          notes.push({
+            text: t('slicer.plate.fileFault', {
+              file: loaded.name,
+              reason: t('slicer.prepare.geometryOnly'),
+            }),
+            parts,
+          });
+        if (imported.bodies !== undefined && imported.bodies > 1)
+          notes.push({
+            text: t('slicer.plate.fileFault', {
+              file: loaded.name,
+              reason: t('slicer.prepare.bodies', { count: imported.bodies }),
+            }),
+            parts,
+          });
       } catch (error) {
         if (closed()) return;
-        const reason = t(faultKey(error, reading));
+        const reason = reasonOf(error, reading);
         faults.push(
           name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
         );
       }
     }
     if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
-    if (threeMF) notice = { key: 'slicer.prepare.geometryOnly', params: {} };
+    importNotes = [
+      ...importNotes.filter((note) => note.batch !== batch),
+      ...notes.map((note) => ({ ...note, batch, id: (noteCount += 1) })),
+    ];
+  };
+
+  const isStep = (name: string): boolean => /\.(?:step|stp)$/iu.test(name);
+
+  const reasonOf = (error: unknown, reading: boolean): string => {
+    if (error instanceof StepError)
+      return error.reason === 'empty'
+        ? t('slicer.prepare.noSolids')
+        : t('slicer.prepare.badStep', { reason: error.message });
+    if (error instanceof StepMeshLimitError)
+      return t(
+        error.reason === 'time'
+          ? 'slicer.prepare.tooSlow'
+          : 'slicer.prepare.tooDense',
+      );
+    return t(faultKey(error, reading));
+  };
+
+  /**
+   * Takes each valid value as it is typed, so a file dropped while the field
+   * still has focus is meshed at what the field shows.
+   */
+  const typeTolerance = (event: Event): void => {
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const input = event.currentTarget;
+    if (Number.isFinite(input.valueAsNumber) && input.validity.valid)
+      tolerance = input.valueAsNumber;
+  };
+
+  /** Puts the value in use back when the field is left with an invalid one. */
+  const changeTolerance = (event: Event): void => {
+    typeTolerance(event);
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const input = event.currentTarget;
+    if (!(Number.isFinite(input.valueAsNumber) && input.validity.valid))
+      input.value = String(tolerance);
   };
 
   const faultKey = (error: unknown, reading: boolean): string => {
@@ -346,6 +462,7 @@
     sendable:
       plate.printable &&
       printerBlockOf(printer, flow.queueBlock(printer?.id)) === undefined,
+    importing: loading,
   });
 
   const print = async (): Promise<void> => {
@@ -491,10 +608,15 @@
         if (!signal.aborted) destinationFault = describeFault(error);
       });
 
-    if (from) void load([api.read(from, signal)]);
+    if (from)
+      void load(
+        [api.read(from, signal)],
+        [parseFileRef(from)?.path.split('/').at(-1) ?? ''],
+      );
 
     return () => {
       controller.abort();
+      importNotes = [];
       plate.dispose();
     };
   });
@@ -530,6 +652,34 @@
     onCopy={copy}
   >
     {#snippet trailing()}
+      {#if stepUsed}
+        <div class="flex items-center gap-2" data-part="step-tolerance">
+          <Label for="{id}-tolerance"
+            ><span class="whitespace-nowrap"
+              >{t('slicer.prepare.tolerance')}</span
+            ></Label
+          >
+          <!-- The input fills its box, so the box sets its width. -->
+          <div class="w-20">
+            <Input
+              id="{id}-tolerance"
+              type="number"
+              min="0.001"
+              max="1"
+              step="any"
+              aria-describedby="{id}-tolerance-note"
+              value={tolerance}
+              oninput={typeTolerance}
+              onchange={changeTolerance}
+            />
+          </div>
+          <span
+            id="{id}-tolerance-note"
+            class="text-xs whitespace-nowrap text-muted-foreground"
+            >{t('slicer.prepare.toleranceNote')}</span
+          >
+        </div>
+      {/if}
       <PrinterPicker {printers} chosen={printer?.id} {t} onChoose={choose} />
       <PrintSettingsMenu
         {choices}
@@ -620,14 +770,33 @@
       role="status"
       aria-live="polite"
     >
-      {#if noticeText}
-        <p
-          class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
-          data-part="plate-notice"
-        >
-          {noticeText}
-        </p>
-      {/if}
+      <div class="grid justify-items-center gap-1">
+        {#each shownNotes as note (note.id)}
+          <p
+            class="flex items-center gap-1 border-s-2 border-primary bg-card py-0.5 ps-3 pe-0.5 text-sm text-foreground"
+            data-part="plate-notice"
+          >
+            <span>{note.text}</span>
+            <Button
+              class="pointer-events-auto"
+              variant="ghost"
+              size="icon-sm"
+              label={t('slicer.plate.dismissNote')}
+              onclick={() => {
+                dismiss(note.id);
+              }}><X /></Button
+            >
+          </p>
+        {/each}
+        {#if noticeText}
+          <p
+            class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
+            data-part="plate-notice"
+          >
+            {noticeText}
+          </p>
+        {/if}
+      </div>
     </div>
   </div>
 

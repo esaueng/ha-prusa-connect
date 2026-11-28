@@ -16,6 +16,11 @@ export interface SendSnapshot {
   readonly action: 'print' | 'queue';
   /** The printer takes the plate now, and every part fits its bed. */
   readonly sendable: boolean;
+  /**
+   * A file is still being read onto the plate, so the plate on the screen is
+   * not yet the one that was sliced. Absent means no file is being read.
+   */
+  readonly importing?: boolean;
 }
 
 /**
@@ -28,6 +33,7 @@ export const stillSendable = (
   now: SendSnapshot,
 ): boolean =>
   now.sendable &&
+  now.importing !== true &&
   now.plate === pressed.plate &&
   now.printer === pressed.printer &&
   now.state === pressed.state &&
