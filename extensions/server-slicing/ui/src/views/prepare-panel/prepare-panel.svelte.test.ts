@@ -162,6 +162,38 @@ describe('the build-plate workspace', () => {
     await expect.element(status()).toMatchTextContent('1 part');
   });
 
+  it('scales the selected part from the toolbar and blocks a part grown past the volume', async () => {
+    const api = recording();
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+    const print = page.getByRole('button', { name: 'Print', exact: true });
+    const scale = page.getByLabelText('Scale (%)');
+    await expect.element(scale).toHaveValue(100);
+
+    // The box is 30 mm tall and the bed 270 mm, so ten times is too tall.
+    await scale.fill('1000');
+    await userEvent.keyboard('{Enter}');
+    await expect
+      .element(status())
+      .toMatchTextContent('A part is outside the print volume.');
+    await expect.element(print).toBeDisabled();
+
+    await scale.fill('5000');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(scale).toHaveValue(1000);
+
+    await scale.fill('150');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(print).toBeEnabled();
+
+    // The scale goes with the selection.
+    await page
+      .getByLabelText('3D build plate view')
+      .click({ position: { x: 5, y: 5 } });
+    await expect.element(scale).not.toBeInTheDocument();
+  });
+
   it('sends the settings chosen, and keeps them for the printer', async () => {
     const api = recording();
     const remember = memory();

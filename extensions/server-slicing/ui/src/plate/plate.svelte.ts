@@ -34,6 +34,9 @@ const COPY_OFFSET_MM = 10;
 
 const QUARTER_TURN = new Matrix4().makeRotationZ(Math.PI / 2);
 
+/** The scale a part may take, in percent of its size in the file. */
+export const SCALE_PERCENT = { min: 1, max: 1000 } as const;
+
 /** Why parts were not added. */
 export type AddRefusal = 'tooManyTriangles';
 
@@ -162,6 +165,7 @@ export class Plate {
         // A part kept where the file put it keeps its height; one below the
         // bed is lifted onto it.
         z: imported.preservePlacement ? Math.max(0, floor) : 0,
+        scale: 100,
       };
       taken.push(footprintOf(part));
       placed.push(part);
@@ -223,6 +227,37 @@ export class Plate {
     const gesture = this.#gesture;
     this.#gesture = undefined;
     if (gesture?.moved) this.#push(gesture.before);
+  }
+
+  /** The scale every selected part shares, or undefined when they differ. */
+  get selectionScale(): number | undefined {
+    const scales = this.selection.map((part) => part.scale);
+    const [first] = scales;
+    return scales.every((one) => one === first) ? first : undefined;
+  }
+
+  /**
+   * Scales each selected part to `percent` of its size in the file, the same
+   * on every axis, around the centre of its footprint, and puts it on the bed.
+   * A value outside SCALE_PERCENT is refused and nothing changes.
+   */
+  scale(percent: number): void {
+    if (
+      !Number.isFinite(percent) ||
+      percent < SCALE_PERCENT.min ||
+      percent > SCALE_PERCENT.max ||
+      this.#selected.length === 0 ||
+      this.selection.every((part) => part.scale === percent)
+    )
+      return;
+    this.#change((part) => {
+      const factor = percent / part.scale;
+      const turned = rotated(
+        part,
+        new Matrix4().makeScale(factor, factor, factor).multiply(part.rotation),
+      );
+      return { ...turned, scale: percent };
+    });
   }
 
   /** Turns each selected part 90° about Z, around the centre of its footprint. */

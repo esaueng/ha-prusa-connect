@@ -24,6 +24,8 @@
     DropdownMenuItem,
     DropdownMenuSeparator,
     DropdownMenuTrigger,
+    Input,
+    Label,
     Separator,
     ToggleGroup,
     ToggleGroupItem,
@@ -31,7 +33,11 @@
   import type { Snippet } from 'svelte';
 
   import type { Translate } from '../../api';
-  import { PLATE_MODES, type Plate } from '../../plate/plate.svelte';
+  import {
+    PLATE_MODES,
+    type Plate,
+    SCALE_PERCENT,
+  } from '../../plate/plate.svelte';
   import type { ToolbarLink } from './types';
 
   let {
@@ -61,7 +67,17 @@
     trailing?: Snippet;
   } = $props();
 
+  const id = $props.id();
   const none = $derived(plate.parts.length === 0);
+
+  /** Applies a typed scale; a value the plate refuses puts the shown one back. */
+  const scaled = (event: Event): void => {
+    if (!(event.currentTarget instanceof HTMLInputElement)) return;
+    const input = event.currentTarget;
+    if (Number.isFinite(input.valueAsNumber) && input.validity.valid)
+      plate.scale(input.valueAsNumber);
+    input.value = String(plate.selectionScale ?? '');
+  };
   const unselected = $derived(plate.selected.length === 0);
 </script>
 
@@ -128,6 +144,26 @@
       >
     </DropdownMenuContent>
   </DropdownMenu>
+
+  {#if !unselected}
+    <div class="flex items-center gap-2 ps-1" data-part="plate-scale">
+      <Label for="{id}-scale"
+        ><span class="whitespace-nowrap">{t('slicer.plate.scale')}</span></Label
+      >
+      <!-- The input fills its box, so the box sets its width. -->
+      <div class="w-20">
+        <Input
+          id="{id}-scale"
+          type="number"
+          min={SCALE_PERCENT.min}
+          max={SCALE_PERCENT.max}
+          step="any"
+          value={plate.selectionScale ?? ''}
+          onchange={scaled}
+        />
+      </div>
+    </div>
+  {/if}
 
   <!-- A vertical separator fills its parent, so the parent sets its height. -->
   <div class="mx-1 flex h-6"><Separator orientation="vertical" /></div>

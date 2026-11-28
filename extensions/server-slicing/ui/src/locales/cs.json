@@ -204,6 +204,7 @@
   "slicer.plate.queue": "Přidat do fronty",
   "slicer.plate.reset": "Použít nastavení profilu",
   "slicer.plate.saveStl": "Uložit umístěné STL",
+  "slicer.plate.scale": "Měřítko (%)",
   "slicer.plate.selected": "vybráno: {count}",
   "slicer.plate.settings": "Nastavení tisku",
   "slicer.plate.settingsFor": "Uloženo pro {printer}",

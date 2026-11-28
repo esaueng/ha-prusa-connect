@@ -116,6 +116,7 @@ order:
 | **Move** | a part follows the pointer. Shift-click adds a part to the selection |
 | **Lay flat** | the flat face under the pointer lights up. A click turns the part so that face lies on the bed |
 | **Arrange** | arranges every part, or only the selected ones around the others, or adds a copy of the selection in free space |
+| Scale (%) | shown while parts are selected. Scales them by the same amount on every axis, from 1 to 1000 % |
 | **Undo** and the view | takes the last change back, and looks at the plate from an angle or from above |
 | printer | the printers you may see, with state, model, material and bed size. The plate takes the chosen printer's bed |
 | print settings | layer height, material, supports, infill, walls, brim and the storage for the files, kept for each printer |

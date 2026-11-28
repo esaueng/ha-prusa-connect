@@ -12,7 +12,7 @@ What changed in this module, newest first. The top heading is the version
 
 ### Added
 
-- The build plate holds several parts. Select, move, rotate, lay flat, arrange, copy and remove them, and undo each step. A part outside the print volume turns red and stops the print.
+- The build plate holds several parts. Select, move, rotate, scale, lay flat, arrange, copy and remove them, and undo each step. A part outside the print volume turns red and stops the print.
 - Choose a printer for the plate. The bed takes the printer's size, and Print slices the plate and starts it on an idle printer, with the print time once the plate is sliced. Layer height, material, supports, infill, walls and brim are kept for each printer.
 
 - An STL job may change the layer height, the infill, the walls, the supports and the brim of its saved profile, sent as `settings` in `POST /jobs`. `GET /slicers` lists what each saved profile prints with under `prepare_settings`.

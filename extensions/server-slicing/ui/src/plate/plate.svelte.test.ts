@@ -226,6 +226,55 @@ describe('moving, turning and removing', () => {
     plate.dispose();
   });
 
+  it('scales the selection the same on every axis, and refuses a scale out of range', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100], [10, 20, 30]);
+    plate.press(part.id, false);
+    expect(plate.selectionScale).toBe(100);
+
+    plate.scale(200);
+    const big = plate.parts[0];
+    if (!big) throw new Error('no part');
+    expect([big.x, big.y, big.z, big.scale]).toEqual([100, 100, 0, 200]);
+    expect(big.size.halfX).toBeCloseTo(10);
+    expect(big.size.halfY).toBeCloseTo(20);
+    expect(big.size.height).toBeCloseTo(60);
+    expect(corner(big)).toEqual([90, 80, 0]);
+
+    // A scale is set against the size in the file, not against the last one.
+    plate.scale(50);
+    expect(plate.parts[0]?.size.height).toBeCloseTo(15);
+
+    for (const refused of [0, 0.5, 1001, Number.NaN]) {
+      const before = plate.parts;
+      plate.scale(refused);
+      expect(plate.parts).toBe(before);
+    }
+
+    // Too large for the volume: the part turns red and blocks the plate.
+    plate.scale(1000);
+    expect(plate.outside).toEqual([part.id]);
+    expect(plate.printable).toBe(false);
+
+    plate.undo();
+    plate.undo();
+    expect(plate.parts[0]?.scale).toBe(200);
+    plate.dispose();
+  });
+
+  it('answers no shared scale for a selection of different scales', () => {
+    const plate = plateOf();
+    const a = placed(plate, [50, 50]);
+    const b = placed(plate, [150, 50]);
+    plate.press(a.id, false);
+    plate.scale(150);
+    plate.press(b.id, true);
+    expect(plate.selectionScale).toBeUndefined();
+    plate.scale(120);
+    expect(plate.parts.map((part) => part.scale)).toEqual([120, 120]);
+    plate.dispose();
+  });
+
   it('removes the selection, and Undo brings it back', () => {
     const plate = plateOf();
     const a = placed(plate, [30, 30]);

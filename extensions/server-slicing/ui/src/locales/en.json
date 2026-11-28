@@ -204,6 +204,7 @@
   "slicer.plate.queue": "Add to queue",
   "slicer.plate.reset": "Use the profile's settings",
   "slicer.plate.saveStl": "Save positioned STL",
+  "slicer.plate.scale": "Scale (%)",
   "slicer.plate.selected": "{count} selected",
   "slicer.plate.settings": "Print settings",
   "slicer.plate.settingsFor": "Kept for {printer}",

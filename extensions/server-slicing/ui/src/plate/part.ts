@@ -30,6 +30,8 @@ export interface Part {
   readonly y: number;
   /** How far the part's lowest point is above the bed. */
   readonly z: number;
+  /** The part's size against the file's, in percent, the same on every axis. */
+  readonly scale: number;
 }
 
 /** A rectangle on the bed. */
