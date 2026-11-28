@@ -553,7 +553,7 @@ void test('every git of these tests reads no system or user configuration or att
   assert.equal(env.GIT_ATTR_NOSYSTEM, '1');
   assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
   assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null');
-  assert.equal(env.GIT_DIR, undefined);
+  assert.ok(!('GIT_DIR' in env));
   assert.equal(env.HOME, HOME);
   assert.equal(env.XDG_CONFIG_HOME, HOME);
   assert.deepEqual(readdirSync(HOME), []);
