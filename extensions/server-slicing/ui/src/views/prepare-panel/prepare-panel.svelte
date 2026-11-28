@@ -5,13 +5,18 @@
   sliced on this server and sent to the printer.
 -->
 <script lang="ts">
-  import { FileUp } from '@lucide/svelte';
+  import { FileUp, X } from '@lucide/svelte';
   import {
     describeFault,
     type FaultText,
     type MessageParams,
   } from '@prusa/connect-ui/i18n';
-  import { FaultAlert, Input, Label } from '@prusa/connect-ui/primitives';
+  import {
+    Button,
+    FaultAlert,
+    Input,
+    Label,
+  } from '@prusa/connect-ui/primitives';
   import type { Device } from '@prusa/connect-ui/domain';
   import { parseFileRef } from '@prusa/connect-ui/slots';
   import { onMount, untrack } from 'svelte';
@@ -104,11 +109,31 @@
   let reads: Promise<void> = Promise.resolve();
   const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
+  /** One note about a file, and the parts reading that file put on the plate. */
+  interface ImportNote {
+    readonly id: number;
+    readonly batch: number;
+    readonly text: string;
+    readonly parts: readonly string[];
+  }
   /**
    * What each batch said about its files, named by file. A batch sets only
-   * its own notes, so a later batch leaves an earlier one's in place.
+   * its own notes. A note is shown while one of its parts is on the plate, so
+   * deleting the parts hides it and Undo brings it back; a note with no parts
+   * stays until it is dismissed.
    */
-  let importNotes = $state.raw<readonly { batch: number; text: string }[]>([]);
+  let importNotes = $state.raw<readonly ImportNote[]>([]);
+  let noteCount = 0;
+  const shownNotes = $derived.by(() => {
+    const onPlate = new Set(plate.parts.map((part) => part.id));
+    return importNotes.filter(
+      (note) =>
+        note.parts.length === 0 || note.parts.some((id) => onPlate.has(id)),
+    );
+  });
+  const dismiss = (id: number): void => {
+    importNotes = importNotes.filter((note) => note.id !== id);
+  };
   let batchCount = 0;
   /** The STEP mesh tolerance for files added from now on, in mm. */
   let tolerance = $state(STEP_TOLERANCE_MM);
@@ -285,7 +310,7 @@
     batch: number,
   ): Promise<void> => {
     const faults: string[] = [];
-    const notes: string[] = [];
+    const notes: { text: string; parts: readonly string[] }[] = [];
     for (const [at, file] of files.entries()) {
       // A batch that waited for another may start after the page closed.
       if (closed()) return;
@@ -316,20 +341,24 @@
           );
           continue;
         }
+        // The plate selects exactly the parts it has just added.
+        const parts = plate.selected;
         if (loaded.name.toLowerCase().endsWith('.3mf'))
-          notes.push(
-            t('slicer.plate.fileFault', {
+          notes.push({
+            text: t('slicer.plate.fileFault', {
               file: loaded.name,
               reason: t('slicer.prepare.geometryOnly'),
             }),
-          );
+            parts,
+          });
         if (imported.bodies !== undefined && imported.bodies > 1)
-          notes.push(
-            t('slicer.plate.fileFault', {
+          notes.push({
+            text: t('slicer.plate.fileFault', {
               file: loaded.name,
               reason: t('slicer.prepare.bodies', { count: imported.bodies }),
             }),
-          );
+            parts,
+          });
       } catch (error) {
         if (closed()) return;
         const reason = reasonOf(error, reading);
@@ -341,7 +370,7 @@
     if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
     importNotes = [
       ...importNotes.filter((note) => note.batch !== batch),
-      ...notes.map((text) => ({ batch, text })),
+      ...notes.map((note) => ({ ...note, batch, id: (noteCount += 1) })),
     ];
   };
 
@@ -587,6 +616,7 @@
 
     return () => {
       controller.abort();
+      importNotes = [];
       plate.dispose();
     };
   });
@@ -741,12 +771,20 @@
       aria-live="polite"
     >
       <div class="grid justify-items-center gap-1">
-        {#each importNotes as note, at (at)}
+        {#each shownNotes as note (note.id)}
           <p
-            class="border-s-2 border-primary bg-card px-3 py-1.5 text-sm text-foreground"
+            class="pointer-events-auto flex items-center gap-1 border-s-2 border-primary bg-card py-0.5 ps-3 pe-0.5 text-sm text-foreground"
             data-part="plate-notice"
           >
-            {note.text}
+            <span>{note.text}</span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              label={t('slicer.plate.dismissNote')}
+              onclick={() => {
+                dismiss(note.id);
+              }}><X /></Button
+            >
           </p>
         {/each}
         {#if noticeText}

@@ -193,6 +193,7 @@
   "slicer.plate.blocked.state": "Tiskárna teď nemůže spustit tisk.",
   "slicer.plate.brim": "Límec",
   "slicer.plate.copy": "Přidat kopii",
+  "slicer.plate.dismissNote": "Zavřít",
   "slicer.plate.downloadGcode": "Stáhnout G-code",
   "slicer.plate.estimate": "Odhadovaná doba tisku",
   "slicer.plate.fewerWalls": "O jednu stěnu méně",

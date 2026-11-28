@@ -193,6 +193,7 @@
   "slicer.plate.blocked.state": "The printer cannot start a print now.",
   "slicer.plate.brim": "Brim",
   "slicer.plate.copy": "Add a copy",
+  "slicer.plate.dismissNote": "Dismiss",
   "slicer.plate.downloadGcode": "Download G-code",
   "slicer.plate.estimate": "Estimated print time",
   "slicer.plate.fewerWalls": "One wall fewer",

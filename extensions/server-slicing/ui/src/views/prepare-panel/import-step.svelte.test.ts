@@ -1,4 +1,4 @@
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
@@ -610,5 +610,42 @@ describe('what the re-check of the fixes found', () => {
     } finally {
       answers.restore();
     }
+  });
+});
+
+describe('what the re-check of the notes found', () => {
+  const bodiesNote = () =>
+    page.getByText(
+      'block-and-peg-inch.step: The 2 bodies of the STEP file are one part on the plate.',
+    );
+  const notes = () => page.getByTestId('plate-notice').elements();
+
+  it('shows a note while its parts are on the plate, and again after Undo', async () => {
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: workspace() });
+    for (let round = 1; round <= 5; round += 1) {
+      drop(await loadFixture('block-and-peg-inch.step'));
+      await expect.element(status()).toMatchTextContent('1 part');
+      await expect.element(bodiesNote()).toBeVisible();
+      // The part just added is selected; Delete removes it.
+      await userEvent.keyboard('{Delete}');
+      await expect.element(status()).toMatchTextContent('0 parts');
+      await expect.element(bodiesNote()).not.toBeInTheDocument();
+      expect(notes()).toHaveLength(0);
+    }
+    await userEvent.keyboard('{Control>}z{/Control}');
+    await expect.element(status()).toMatchTextContent('1 part');
+    await expect.element(bodiesNote()).toBeVisible();
+    expect(notes()).toHaveLength(1);
+  });
+
+  it('dismisses a note and keeps its part', async () => {
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: workspace() });
+    drop(await loadFixture('block-and-peg-inch.step'));
+    await expect.element(bodiesNote()).toBeVisible();
+    await page.getByRole('button', { name: 'Dismiss' }).click();
+    await expect.element(bodiesNote()).not.toBeInTheDocument();
+    await expect.element(status()).toMatchTextContent('1 part');
   });
 });
