@@ -83,12 +83,15 @@ describe('the build-plate workspace', () => {
       }),
       expect.any(AbortSignal),
     );
-    expect(api.print).toHaveBeenCalledWith({
-      deviceId: 'henry',
-      storage: 'local',
-      source: slicedJob.result?.path,
-      name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
-    });
+    expect(api.print).toHaveBeenCalledWith(
+      {
+        deviceId: 'henry',
+        storage: 'local',
+        source: slicedJob.result?.path,
+        name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
+      },
+      expect.any(AbortSignal),
+    );
     // The time comes from the finished slice of this plate.
     await expect
       .element(page.getByTestId('print-button'))
@@ -403,5 +406,96 @@ describe('what the review found', () => {
     await expect
       .element(page.getByText(/^broken\.stl: Could not open the model/u))
       .toBeVisible();
+  });
+});
+
+describe('what the re-check found', () => {
+  /** An API whose slice ends only when the test says so. */
+  const held = () => {
+    let finish: (job: Job) => void = () => undefined;
+    const api = recording({
+      submit: () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    return {
+      api,
+      finish: (job: Job) => {
+        finish(job);
+      },
+    };
+  };
+
+  it('sends nothing when the printer’s bed shrinks while the plate is sliced', async () => {
+    const { api, finish } = held();
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    await expect.poll(() => api.submit.mock.calls.length).toBe(1);
+    const small = {
+      ...henry,
+      build_volume: { x_mm: 100, y_mm: 100, z_mm: 20 },
+    };
+    await screen.rerender({ devices: [small, charlie, xl] });
+    await expect
+      .element(status())
+      .toMatchTextContent('Henry · bed 100 × 100 mm');
+
+    finish(placedJob);
+    await expect
+      .element(page.getByText(/The plate changed while it was sliced/u))
+      .toBeVisible();
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing once the workspace closes while the plate is sliced', async () => {
+    let finish: (job: Job) => void = () => undefined;
+    const api = recording({
+      job: () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await page.viewport(1440, 900);
+    const screen = await render(PreparePanel, { props: props(api) });
+    await expect.element(status()).toMatchTextContent('1 part');
+
+    await page.getByRole('button', { name: 'Print', exact: true }).click();
+    // The first reading of the job comes after one poll interval.
+    await expect
+      .poll(() => api.job.mock.calls.length, { timeout: 5000 })
+      .toBe(1);
+    await screen.unmount();
+    finish(slicedJob);
+    // Give the print every chance to run.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(api.print).not.toHaveBeenCalled();
+  });
+
+  it('adds a file dropped while a model from Storage is still read', async () => {
+    let read: (file: File) => void = () => undefined;
+    const api = recording({
+      read: () =>
+        new Promise<File>((resolve) => {
+          read = resolve;
+        }),
+    });
+    await page.viewport(1440, 900);
+    await render(PreparePanel, { props: props(api) });
+    await expect.poll(() => api.read.mock.calls.length).toBe(1);
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(modelFile('dropped.stl'));
+    page
+      .getByLabelText('3D build plate view')
+      .element()
+      .dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+    read(modelFile('from-storage.stl'));
+
+    await expect.element(status()).toMatchTextContent('2 parts');
+    expect(page.getByRole('alert').elements()).toHaveLength(0);
   });
 });

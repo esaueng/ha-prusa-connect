@@ -144,8 +144,9 @@ one.
 **Print** saves the plate as one STL with a unique name, slices it, and sends
 the G-code to an idle printer, which starts it. Once the plate is sliced, the
 button shows the print time from the G-code. A change to the plate or to the
-settings slices it again. When the plate, its settings or the printer change
-while the plate is being sliced, nothing is sent and the plate says so. A printer that is printing, or that still holds a
+settings slices it again. When the plate, its settings, the printer or its
+bed change while the plate is being sliced, or a part no longer fits, nothing
+is sent and the plate says so. Nothing is sent after the page is closed. A printer that is printing, or that still holds a
 finished print, shows **Add to queue** instead. That button is off for now:
 the queue belongs to the Print queue module, and this module has no approved
 call to it. The menu beside the button slices without printing, downloads

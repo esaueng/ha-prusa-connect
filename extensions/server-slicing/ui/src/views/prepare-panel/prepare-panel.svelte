@@ -19,8 +19,8 @@
   import type { STLBed, Translate } from '../../api';
   import { footprintOf, worldMatrix } from '../../plate/part';
   import {
-    meshKey,
     PlateFlow,
+    type PrintState,
     signatureOf,
   } from '../../plate/plate-flow.svelte';
   import { plateScene, type PlateScene } from '../../plate/plate-scene';
@@ -99,7 +99,10 @@
   let scene = $state.raw<PlateScene>();
   let webglFailed = $state(false);
   let top = $state(false);
-  let loading = $state(false);
+  /** How many batches of files are waiting or being read. */
+  let batches = $state(0);
+  let reads: Promise<void> = Promise.resolve();
+  const loading = $derived(batches > 0);
   let modelFaults = $state.raw<readonly string[]>([]);
   let notice = $state<{ key: string; params: MessageParams }>();
   let destinations = $state.raw<Destination[]>([]);
@@ -108,7 +111,6 @@
     untrack(() => remember.read(PRINTER_KEY)) ?? undefined,
   );
   let choicesFor = $state.raw<Readonly<Record<string, PlateChoices>>>({});
-  let loadingVersion = 0;
 
   const printers = $derived(printerChoicesOf(devices));
   const printer = $derived(
@@ -176,7 +178,7 @@
       matrix: worldMatrix(part),
     })),
   );
-  const key = $derived(meshKey(meshes));
+  const key = $derived(String(plate.revision));
   const signature = $derived(
     signatureOf({ meshKey: key, profile: profile ?? '', settings, storage }),
   );
@@ -216,57 +218,61 @@
   };
 
   /**
-   * Reads files onto the plate as one batch, in the order given. A file that
-   * cannot be read is named in the faults, and the others are still added.
+   * Reads files onto the plate as one batch, in the order given. A batch that
+   * arrives while another is read waits for it, so every file is added. A
+   * file that cannot be read is named in the faults, and the others are still
+   * added.
    */
-  const load = async (
+  const load = (files: readonly (Promise<File> | File)[]): Promise<void> => {
+    if (batches === 0) {
+      modelFaults = [];
+      notice = undefined;
+    }
+    batches += 1;
+    const read = reads.then(() => readBatch(files));
+    reads = read.finally(() => {
+      batches -= 1;
+    });
+    return read;
+  };
+
+  const readBatch = async (
     files: readonly (Promise<File> | File)[],
   ): Promise<void> => {
-    const version = ++loadingVersion;
-    loading = true;
-    modelFaults = [];
-    notice = undefined;
     const faults: string[] = [];
-    let added = 0;
     let threeMF = false;
-    try {
-      for (const file of files) {
-        let reading = true;
-        let name = '';
-        try {
-          const loaded = await file;
-          reading = false;
-          name = loaded.name;
-          const imported = await readMeshFile(loaded);
-          if (controller.signal.aborted || loadingVersion !== version) {
-            for (const part of imported.parts) part.geometry.dispose();
-            return;
-          }
-          if (plate.add(imported, loaded.name)) {
-            faults.push(
-              t('slicer.plate.fileFault', {
-                file: loaded.name,
-                reason: t('slicer.plate.notice.tooManyTriangles'),
-              }),
-            );
-            continue;
-          }
-          added += 1;
-          threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
-        } catch (error) {
-          if (controller.signal.aborted || loadingVersion !== version) return;
-          const reason = t(faultKey(error, reading));
-          faults.push(
-            name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
-          );
+    for (const file of files) {
+      let reading = true;
+      let name = '';
+      try {
+        const loaded = await file;
+        reading = false;
+        name = loaded.name;
+        const imported = await readMeshFile(loaded);
+        if (controller.signal.aborted) {
+          for (const part of imported.parts) part.geometry.dispose();
+          return;
         }
+        if (plate.add(imported, loaded.name)) {
+          faults.push(
+            t('slicer.plate.fileFault', {
+              file: loaded.name,
+              reason: t('slicer.plate.notice.tooManyTriangles'),
+            }),
+          );
+          continue;
+        }
+        threeMF ||= loaded.name.toLowerCase().endsWith('.3mf');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const reason = t(faultKey(error, reading));
+        faults.push(
+          name ? t('slicer.plate.fileFault', { file: name, reason }) : reason,
+        );
       }
-      modelFaults = faults;
-      if (added > 0 && threeMF)
-        notice = { key: 'slicer.prepare.geometryOnly', params: {} };
-    } finally {
-      if (loadingVersion === version) loading = false;
     }
+    if (faults.length > 0) modelFaults = [...modelFaults, ...faults];
+    if (threeMF) notice = { key: 'slicer.prepare.geometryOnly', params: {} };
   };
 
   const faultKey = (error: unknown, reading: boolean): string => {
@@ -313,9 +319,10 @@
   };
 
   /** The plate and the printer as they are now, read when the slice ends. */
-  const now = (): { signature: string; printer: string | undefined } => ({
-    signature,
+  const now = (): PrintState => ({
+    key: JSON.stringify([signature, bed]),
     printer: printer?.id,
+    printable: plate.printable,
   });
 
   const print = async (): Promise<void> => {

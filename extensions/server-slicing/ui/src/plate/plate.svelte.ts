@@ -72,6 +72,7 @@ export class Plate {
       .map((part) => part.id);
   });
   #gesture: { before: readonly Part[]; moved: boolean } | undefined;
+  #revision = $state(0);
   #next = 1;
   /** Every mesh the plate took, so dispose frees one that only Undo held. */
   readonly #meshes: BufferGeometry[] = [];
@@ -121,6 +122,14 @@ export class Plate {
 
   set mode(value: PlateMode) {
     if (PLATE_MODES.includes(value)) this.#mode = value;
+  }
+
+  /**
+   * Counts every change to the parts, so two plates that differ in anything,
+   * however little, never share a number. A slice is matched to the plate by it.
+   */
+  get revision(): number {
+    return this.#revision;
   }
 
   get canUndo(): boolean {
@@ -201,7 +210,7 @@ export class Plate {
       placed.push(part);
     }
 
-    this.#parts = [...this.#parts, ...placed];
+    this.#setParts([...this.#parts, ...placed]);
     this.#selected = placed.map((part) => part.id);
     return undefined;
   }
@@ -245,10 +254,12 @@ export class Plate {
     const gesture = this.#gesture;
     if (!gesture || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
     gesture.moved = gesture.moved || dx !== 0 || dy !== 0;
-    this.#parts = gesture.before.map((part) =>
-      this.#selected.includes(part.id)
-        ? { ...part, x: part.x + dx, y: part.y + dy }
-        : part,
+    this.#setParts(
+      gesture.before.map((part) =>
+        this.#selected.includes(part.id)
+          ? { ...part, x: part.x + dx, y: part.y + dy }
+          : part,
+      ),
     );
   }
 
@@ -300,8 +311,8 @@ export class Plate {
   remove(): void {
     if (this.#selected.length === 0) return;
     this.#record();
-    this.#parts = this.#parts.filter(
-      (part) => !this.#selected.includes(part.id),
+    this.#setParts(
+      this.#parts.filter((part) => !this.#selected.includes(part.id)),
     );
     this.#selected = [];
   }
@@ -315,8 +326,8 @@ export class Plate {
       faceNormal(part.geometry, face),
     );
     this.#record();
-    this.#parts = this.#parts.map((one) =>
-      one.id === id ? rotated(one, rotation) : one,
+    this.#setParts(
+      this.#parts.map((one) => (one.id === id ? rotated(one, rotation) : one)),
     );
   }
 
@@ -340,10 +351,12 @@ export class Plate {
     // part was moved to, so nothing moves unless every part has room.
     if (unplaced.length > 0) return unplaced.length;
     this.#record();
-    this.#parts = this.#parts.map((part) => {
-      const at = placed.get(part.id);
-      return at ? { ...part, x: at[0], y: at[1], z: 0 } : part;
-    });
+    this.#setParts(
+      this.#parts.map((part) => {
+        const at = placed.get(part.id);
+        return at ? { ...part, x: at[0], y: at[1], z: 0 } : part;
+      }),
+    );
     return 0;
   }
 
@@ -380,7 +393,7 @@ export class Plate {
     }
     this.#next += copies.length;
     this.#record();
-    this.#parts = [...this.#parts, ...copies];
+    this.#setParts([...this.#parts, ...copies]);
     this.#selected = copies.map((part) => part.id);
     return copies.length;
   }
@@ -389,8 +402,10 @@ export class Plate {
   undo(): void {
     const previous = this.#history.at(-1);
     if (!previous) return;
+    // A drag still open would put its own snapshot back on the next move.
+    this.#gesture = undefined;
     this.#history = this.#history.slice(0, -1);
-    this.#parts = previous;
+    this.#setParts(previous);
     const present = previous.map((part) => part.id);
     const kept = this.#selected.filter((id) => present.includes(id));
     if (kept.length !== this.#selected.length) this.#selected = kept;
@@ -408,13 +423,20 @@ export class Plate {
 
   #change(turn: (part: Part) => Part): void {
     this.#record();
-    this.#parts = this.#parts.map((part) =>
-      this.#selected.includes(part.id) ? turn(part) : part,
+    this.#setParts(
+      this.#parts.map((part) =>
+        this.#selected.includes(part.id) ? turn(part) : part,
+      ),
     );
   }
 
   #record(): void {
     this.#push(this.#parts);
+  }
+
+  #setParts(parts: readonly Part[]): void {
+    this.#parts = parts;
+    this.#revision += 1;
   }
 
   #push(parts: readonly Part[]): void {
@@ -428,9 +450,11 @@ export class Plate {
    * one a step after an Undo held.
    */
   #collect(): void {
-    const held = [this.#parts, ...this.#history].flatMap((parts) =>
-      parts.map((part) => part.geometry),
-    );
+    const held = [
+      this.#parts,
+      ...this.#history,
+      this.#gesture?.before ?? [],
+    ].flatMap((parts) => parts.map((part) => part.geometry));
     for (const mesh of [...this.#meshes]) {
       if (held.includes(mesh)) continue;
       mesh.dispose();

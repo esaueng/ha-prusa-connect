@@ -24,7 +24,10 @@ export type FlowStep = 'idle' | 'saving' | 'slicing' | 'sending';
 
 /** Everything one slice of the plate depends on. */
 export interface PlateInput {
-  /** Changes whenever a mesh or where it stands changes; see `meshKey`. */
+  /**
+   * Names the plate's parts as they are: the plate's revision, which every
+   * change to a part moves on, however small.
+   */
   readonly meshKey: string;
   /** The file the plate came from, for the name of the saved STL. */
   readonly name: string;
@@ -32,6 +35,16 @@ export interface PlateInput {
   readonly storage: string;
   readonly profile: string;
   readonly settings: PrintSettings | undefined;
+}
+
+/**
+ * What Print compares between pressing it and sending the G-code: a key for
+ * the plate, its settings and its bed, the printer, and whether the plate fits.
+ */
+export interface PrintState {
+  readonly key: string;
+  readonly printer: string | undefined;
+  readonly printable: boolean;
 }
 
 /** A sentence the page shows once a step has ended, as a catalogue key. */
@@ -62,18 +75,6 @@ const pause = (ms: number, signal: AbortSignal): Promise<void> =>
     }
     signal.addEventListener('abort', stop, { once: true });
   });
-
-/** A text that changes whenever a mesh or where it stands changes. */
-export const meshKey = (
-  meshes: readonly (PlacedMesh & { readonly id: string })[],
-): string =>
-  JSON.stringify(
-    meshes.map(({ id, geometry, matrix }) => [
-      id,
-      geometry.uuid,
-      matrix.elements.map((value) => Math.round(value * 1e4) / 1e4),
-    ]),
-  );
 
 /** A text that changes whenever the G-code of the plate would. */
 export const signatureOf = (
@@ -153,31 +154,42 @@ export class PlateFlow {
   /**
    * Slices the plate if it changed, then sends it to an idle printer and
    * starts it. Saving and slicing take a while, and the person may change the
-   * plate, its settings or the printer meanwhile. `current` answers the plate
-   * and the printer as they are now; when either is no longer the one sliced,
+   * plate, its settings, the bed or the printer meanwhile. `current` answers
+   * them as they are now. It is read when Print is pressed and again before
+   * the G-code is sent; when anything differs, or the plate no longer fits,
    * nothing is sent and the notice says so.
    */
   async print(
     input: PlateInput,
     printer: { id: string; name: string },
-    current: () => { signature: string; printer: string | undefined },
+    current: () => PrintState,
   ): Promise<boolean> {
+    const pressed = current();
     const ok = await this.#run(async () => {
       const job = await this.#slicedJob(input);
       const result = job.result;
       if (!result) throw new Error('The job wrote no G-code');
+      this.#live();
       const now = current();
-      if (now.signature !== signatureOf(input) || now.printer !== printer.id) {
+      if (
+        now.key !== pressed.key ||
+        now.printer !== printer.id ||
+        !now.printable
+      ) {
         this.#notice = { key: 'slicer.plate.notice.changed', params: {} };
         return false;
       }
       this.#step = 'sending';
-      await this.#api.print({
-        deviceId: printer.id,
-        storage: result.storage,
-        source: result.path,
-        name: result.path.split('/').at(-1) ?? result.path,
-      });
+      await this.#api.print(
+        {
+          deviceId: printer.id,
+          storage: result.storage,
+          source: result.path,
+          name: result.path.split('/').at(-1) ?? result.path,
+        },
+        this.#signal,
+      );
+      this.#live();
       this.#notice = {
         key: 'slicer.plate.notice.printing',
         params: { printer: printer.name },
@@ -202,6 +214,11 @@ export class PlateFlow {
     });
   }
 
+  /** Stops the step once the workspace has closed, before anything else is sent. */
+  #live(): void {
+    if (this.#signal.aborted) throw new Error('The workspace closed');
+  }
+
   async #run<T>(work: () => Promise<T>): Promise<T | undefined> {
     if (this.busy) return undefined;
     this.#fault = undefined;
@@ -221,6 +238,7 @@ export class PlateFlow {
     if (saved?.storage === input.storage && saved.meshKey === input.meshKey)
       return saved.path;
 
+    this.#live();
     this.#step = 'saving';
     const path = await this.#api.save(
       input.storage,
@@ -228,6 +246,7 @@ export class PlateFlow {
       makeSTL(input.meshes),
       this.#signal,
     );
+    this.#live();
     this.#saved = { meshKey: input.meshKey, storage: input.storage, path };
     return path;
   }
@@ -238,6 +257,7 @@ export class PlateFlow {
     if (known) return known;
 
     const path = await this.#savedPath(input);
+    this.#live();
     this.#step = 'slicing';
     let job = await this.#api.submit(
       {
@@ -248,9 +268,11 @@ export class PlateFlow {
       },
       this.#signal,
     );
+    this.#live();
     while (!ENDED.has(job.state)) {
       await pause(this.#pollMs, this.#signal);
       job = await this.#api.job(job.id, this.#signal);
+      this.#live();
     }
     if (job.state !== 'done') {
       // describeFault reads the code and the server's message off what is thrown.

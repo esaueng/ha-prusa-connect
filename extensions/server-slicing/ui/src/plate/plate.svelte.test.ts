@@ -473,6 +473,58 @@ describe('no room', () => {
   });
 });
 
+describe('the plate revision', () => {
+  it('moves on with every change, however small, and on nothing else', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    plate.press(part.id, false);
+    let seen = plate.revision;
+    const moved = (): boolean => {
+      const changed = plate.revision !== seen;
+      seen = plate.revision;
+      return changed;
+    };
+
+    // A change the old rounded matrices could not tell apart.
+    plate.scale(100.004);
+    expect(moved()).toBe(true);
+    plate.press(part.id, false);
+    plate.selectAll();
+    expect(moved()).toBe(false);
+    plate.beginMove();
+    plate.moveBy(0.001, 0);
+    expect(moved()).toBe(true);
+    plate.endMove();
+    plate.rotate();
+    expect(moved()).toBe(true);
+    plate.undo();
+    expect(moved()).toBe(true);
+    plate.scale(Number.NaN);
+    expect(moved()).toBe(false);
+    plate.dispose();
+  });
+});
+
+describe('Undo during a drag', () => {
+  it('ends the drag, so the part Undo removed does not come back', () => {
+    const plate = plateOf();
+    const part = placed(plate, [100, 100]);
+    const freed = vi.fn();
+    part.geometry.addEventListener('dispose', freed);
+    plate.press(part.id, false);
+    plate.beginMove();
+    plate.moveBy(5, 0);
+
+    plate.undo();
+    expect(plate.parts).toEqual([]);
+    expect(freed).toHaveBeenCalledTimes(1);
+    plate.moveBy(10, 0);
+    plate.endMove();
+    expect(plate.parts).toEqual([]);
+    plate.dispose();
+  });
+});
+
 describe('the meshes the plate holds', () => {
   const watched = (plate: Plate, at: [number, number]) => {
     const part = placed(plate, at);

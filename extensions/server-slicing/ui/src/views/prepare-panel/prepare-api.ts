@@ -1,4 +1,9 @@
-import { printStoredFile } from '@prusa/connect-ui/data';
+import {
+  landingPathOf,
+  NoPrinterStorage,
+  printFile,
+  readDeviceStorages,
+} from '@prusa/connect-ui/data';
 import { parseFileRef, type ModuleHost } from '@prusa/connect-ui/slots';
 
 import type { Job, SlicerApi } from '../../api';
@@ -61,8 +66,11 @@ export interface PrepareApi {
     path: string,
     signal: AbortSignal,
   ) => Promise<Blob>;
-  /** Sends the G-code to an idle printer and starts it. A refusal throws. */
-  readonly print: (request: PrintRequest) => Promise<void>;
+  /**
+   * Sends the G-code to an idle printer and starts it. A refusal throws.
+   * Nothing is sent once the signal has aborted.
+   */
+  readonly print: (request: PrintRequest, signal: AbortSignal) => Promise<void>;
 }
 
 const readFile = async (response: Response, name: string): Promise<File> => {
@@ -146,12 +154,23 @@ export const prepareOn = (
     );
     return response.blob();
   },
-  async print({ deviceId, storage, source, name }) {
-    const outcome = await printStoredFile(client, {
+  // The library's printStoredFile takes no signal, so its two steps are
+  // written out here: a closed page must not start a print after the lookup.
+  async print({ deviceId, storage, source, name }, signal) {
+    const page = await readDeviceStorages(client, deviceId, {
+      refresh: true,
+      signal,
+    });
+    const path = page.reported
+      ? landingPathOf(page.items ?? [], name)
+      : undefined;
+    if (path === undefined) throw new NoPrinterStorage(deviceId, page.reported);
+    if (signal.aborted) throw new Error('The workspace closed');
+    const outcome = await printFile(client, {
       deviceId,
-      storage,
+      path,
       source,
-      name,
+      storage,
     });
     if (!outcome.ok) {
       // describeFault reads a code and a message from a thrown value.

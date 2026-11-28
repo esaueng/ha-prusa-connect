@@ -10,9 +10,9 @@ import {
 } from '../views/prepare-panel/prepare-fixtures';
 import type { PrepareApi } from '../views/prepare-panel/prepare-api';
 import {
-  meshKey,
   PlateFlow,
   type PlateInput,
+  type PrintState,
   signatureOf,
 } from './plate-flow.svelte';
 
@@ -27,7 +27,7 @@ const inputOf = (x = 50, settings?: PlateInput['settings']): PlateInput => {
     },
   ];
   return {
-    meshKey: meshKey(meshes),
+    meshKey: `plate-at-${String(x)}`,
     name: 'bracket.stl',
     meshes,
     storage: 'local',
@@ -41,10 +41,17 @@ const running: Job = { ...placedJob, state: 'running', progress: 40 };
 const henryPrinter = { id: 'henry', name: 'Henry' };
 
 /** The plate and the printer as they were when Print was pressed. */
-const unchangedFor = (input: PlateInput) => () => ({
-  signature: signatureOf(input),
+const unchangedFor = (input: PlateInput) => (): PrintState => ({
+  key: signatureOf(input),
   printer: 'henry',
+  printable: true,
 });
+
+/** Answers `first` when Print is pressed and `then` every time after. */
+const changingTo = (first: PrintState, then: PrintState) => {
+  let reads = 0;
+  return (): PrintState => (reads++ === 0 ? first : then);
+};
 
 /** An API that answers like the fixtures and records each call. */
 const recording = (more: Partial<PrepareApi> = {}) => ({
@@ -83,12 +90,15 @@ describe('slicing and printing the plate', () => {
       expect.any(AbortSignal),
     );
     expect(api.job).toHaveBeenCalledTimes(2);
-    expect(api.print).toHaveBeenCalledWith({
-      deviceId: 'henry',
-      storage: 'local',
-      source: slicedJob.result?.path,
-      name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
-    });
+    expect(api.print).toHaveBeenCalledWith(
+      {
+        deviceId: 'henry',
+        storage: 'local',
+        source: slicedJob.result?.path,
+        name: '3f9a01c2-bracket-placed-core-one-petg.gcode',
+      },
+      expect.any(AbortSignal),
+    );
     expect(flow.notice).toEqual({
       key: 'slicer.plate.notice.printing',
       params: { printer: 'Henry' },
@@ -156,25 +166,56 @@ describe('slicing and printing the plate', () => {
     expect(flow.step).toBe('idle');
   });
 
-  it('sends nothing when the plate, its settings or the printer changed during the slice', async () => {
+  it('sends nothing when the plate, its bed, the printer or the fit changed during the slice', async () => {
+    const pressed: PrintState = {
+      key: signatureOf(inputOf()),
+      printer: 'henry',
+      printable: true,
+    };
     for (const now of [
-      { signature: signatureOf(inputOf(60)), printer: 'henry' },
-      {
-        signature: signatureOf(inputOf(50, { walls: 4 })),
-        printer: 'henry',
-      },
-      { signature: signatureOf(inputOf()), printer: 'xl' },
+      { ...pressed, key: signatureOf(inputOf(60)) },
+      { ...pressed, key: signatureOf(inputOf(50, { walls: 4 })) },
+      { ...pressed, key: `${pressed.key} on a 100 × 100 bed` },
+      { ...pressed, printer: 'xl' },
+      { ...pressed, printable: false },
     ]) {
       const api = recording();
       const flow = new PlateFlow(api, new AbortController().signal, 1);
       await expect(
-        flow.print(inputOf(), henryPrinter, () => now),
+        flow.print(inputOf(), henryPrinter, changingTo(pressed, now)),
       ).resolves.toBe(false);
       expect(api.submit).toHaveBeenCalledTimes(1);
       expect(api.print).not.toHaveBeenCalled();
       expect(flow.notice?.key).toBe('slicer.plate.notice.changed');
       expect(flow.step).toBe('idle');
     }
+  });
+
+  it('sends nothing once the workspace closes while the slice is pending', async () => {
+    let finish: (job: Job) => void = () => undefined;
+    const controller = new AbortController();
+    const api = recording({
+      job: () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const flow = new PlateFlow(api, controller.signal, 1);
+    // Nothing about the plate changes, so only the closing can stop the print.
+    const state = {
+      ...unchangedFor(inputOf())(),
+      signature: signatureOf(inputOf()),
+    };
+    const printed = flow.print(inputOf(), henryPrinter, () => state);
+    await vi.waitFor(() => {
+      expect(api.job).toHaveBeenCalled();
+    });
+
+    controller.abort();
+    finish(slicedJob);
+    await expect(printed).resolves.toBe(false);
+    expect(api.print).not.toHaveBeenCalled();
+    expect(flow.fault).toBeUndefined();
   });
 
   it('keeps the printer’s refusal as the fault', async () => {
